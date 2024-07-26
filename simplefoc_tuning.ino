@@ -148,7 +148,9 @@ void on_demand_setup() {
   //the higher, the smoother.
 
   driver.voltage_power_supply = 12;
-  driver.voltage_limit = 6;
+  driver.voltage_limit = 10;
+  motor.current_limit = 1; // Amps - default 0.2Amps
+
 
   driver.pwm_frequency = DRIVER_PWM_FREQ; 
   sensor.init();
@@ -162,8 +164,9 @@ void on_demand_setup() {
   motor.PID_velocity.P = 0.751;
   motor.PID_velocity.I = 2.672;
   motor.PID_velocity.D = 0.00005;
+  
   motor.PID_velocity.output_ramp = 100000.0;
-  motor.LPF_velocity.Tf = 0.03;
+  motor.LPF_velocity.Tf = 0.05;
   motor.PID_velocity.limit = 50; // 0 means no limit
 
   motor.init();
@@ -171,7 +174,8 @@ void on_demand_setup() {
   motor.linkCurrentSense(&current_sense);
 
   // motor.monitor_variables = 0xFF; // Monitor all values
-  motor.monitor_variables = _MON_TARGET | _MON_VEL | _MON_ANGLE;  // default _MON_TARGET | _MON_VOLT_Q | _MON_VEL | _MON_ANGLE
+  // motor.monitor_variables = _MON_TARGET | _MON_VEL | _MON_ANGLE;  // default _MON_TARGET | _MON_VOLT_Q | _MON_VEL | _MON_ANGLE
+  motor.monitor_variables = 0;
 
 
 
@@ -181,6 +185,7 @@ void on_demand_setup() {
   Serial.println("Finished board initalization");
   _delay(300);
   setup_done = true;
+
 }
 
 void loop() {
@@ -190,7 +195,7 @@ void loop() {
     motor.monitor();
     command.run();
 
-    // Update test routine if it's running
+    // Update test routine if i2t's running
     if (testState != IDLE) {
       update_test_routine();
     }
@@ -198,8 +203,6 @@ void loop() {
     // Check for button events
     switch (button.checkButton()) {
       case SINGLE_PRESS:
-        // Handle single press if needed
-        break;
       case DOUBLE_PRESS:
         if (testState == IDLE) {
           run_test_routine();
