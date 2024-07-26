@@ -116,7 +116,7 @@ void update_test_routine() {
       break;
     case COMPLETED:
       Serial.println("Test routine completed. Switching to torque mode.");
-      motor.controller = MotionControlType::torque;
+      motor.controller = MotionControlType::velocity;
       motor.torque_controller = TorqueControlType::voltage;
       motor.move(0); // Set initial torque to 0
       testState = IDLE;
