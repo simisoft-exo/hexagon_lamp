@@ -1,0 +1,30 @@
+[
+    {
+        "device_id": "0",
+        "device_serial_no": "0671FF383159503043112607"
+    },
+    {
+        "device_id": "1",
+        "device_serial_no": "066DFF515049657187212124"
+    },
+    {
+        "device_id": "2",
+        "device_serial_no": "066CFF383159503043112637"
+    },
+    {
+        "device_id": "3",
+        "device_serial_no": "066BFF515049657187203314"
+    },
+    {
+        "device_id": "4",
+        "device_serial_no": "066FFF383159503043114308"
+    },
+    {
+        "device_id": "5",
+        "device_serial_no": "066EFF383159503043112729"
+    },
+    {
+        "device_id": "6",
+        "device_serial_no": "066CFF383159503043112926"
+    }
+]
