@@ -141,6 +141,20 @@ void print_device_serial_no() {
   SimpleFOCDebug::println(serial);
 }
 
+void reset_board() {
+  Serial.println("Reset command received. Resetting board...");
+  delay(1000);
+  NVIC_SystemReset();
+}
+
+void start_test_routine() {
+  if (testState == IDLE) {
+    Serial.println("Test command received. Starting test routine...");
+    run_test_routine();
+  } else {
+    Serial.println("Test already in progress");
+  }
+}
 void setup() {
   Serial.begin(BAUD_RATE);
   pinMode(A_BUTTON, INPUT);
@@ -225,9 +239,7 @@ void loop() {
         }
         break;
       case LONG_PRESS:
-        Serial.println("Long press detected. Resetting board...");
-        delay(1000);
-        NVIC_SystemReset();
+        reset_board();
         break;
       default:
         break;
@@ -252,8 +264,10 @@ void loop() {
         if (command.equalsIgnoreCase("init")) {
           Serial.println("Command triggered board init");
           on_demand_setup();
+        } else if (command.equalsIgnoreCase("test")) {
+          Serial.println("Cannot run test before initialization. Use 'init' first.");
         } else {
-          Serial.println("Unknown command. Use 'init' to initialize.");
+          Serial.println("Unknown command. Use 'init' to initialize or 'test' to run test routine (after init).");
         }
       } else {
         Serial.println("Button triggered board init");
