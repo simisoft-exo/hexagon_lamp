@@ -129,6 +129,16 @@ void update_test_routine() {
 
 void do_motor(char* cmd) {
   command.motor(&motor, cmd);
+  SimpleFOCDebug::print("ACK: Motor command processed: ");
+  SimpleFOCDebug::println(cmd);
+}
+
+void print_device_serial_no() {
+  char serial[25];
+  uint32_t *uniqueId = (uint32_t *)0x1FFF7590;
+  sprintf(serial, "%08lX%08lX%08lX", uniqueId[2], uniqueId[1], uniqueId[0]);
+  SimpleFOCDebug::print("Device Serial Number: ");
+  SimpleFOCDebug::println(serial);
 }
 
 void setup() {
@@ -139,6 +149,8 @@ void setup() {
 
 void on_demand_setup() {
   Wire.setClock(WIRE_FREQ);
+  SimpleFOCDebug::enable();
+
   motor.useMonitoring(Serial);
  
   // 20kHz is the standard for many boards,
@@ -178,11 +190,13 @@ void on_demand_setup() {
   motor.monitor_variables = 0;
 
 
-
   motor.initFOC();
 
   command.add('M', do_motor, (char*)"motor");
-  Serial.println("Finished board initalization");
+  // command.add('B', toggle_debug, (char*)"toggle debug mode");
+  Serial.print("Finished board initalization for: ");
+  print_device_serial_no();
+
   _delay(300);
   setup_done = true;
 
@@ -231,9 +245,20 @@ void loop() {
       lastLogTime = currentTime;
     }
   } else {
-    if (digitalRead(A_BUTTON) == LOW) {
-      Serial.println("Starting board initialization");
-      on_demand_setup();
+    if (digitalRead(A_BUTTON) == LOW || Serial.available()) {
+      if (Serial.available()) {
+        String command = Serial.readStringUntil('\n');
+        command.trim();
+        if (command.equalsIgnoreCase("init")) {
+          Serial.println("Command triggered board init");
+          on_demand_setup();
+        } else {
+          Serial.println("Unknown command. Use 'init' to initialize.");
+        }
+      } else {
+        Serial.println("Button triggered board init");
+        on_demand_setup();
+      }
     }
   }
 }
