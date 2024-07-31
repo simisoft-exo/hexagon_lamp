@@ -189,7 +189,7 @@ func openSerialPort(port string) (*SerialConnection, error) {
 	}
 
 	// Send an newline character to trigger the Arduino acknowledgment
-	_, err = serialConn.Port.Write([]byte("x"))
+	_, err = serialConn.Port.Write([]byte("k"))
 	if err != nil {
 		serialConn.Port.Close()
 		return nil, err
@@ -269,7 +269,7 @@ func sendCommandWithRetry(conn *SerialConnection, command string, retries int) {
 func waitForResponse(conn *SerialConnection, expectedAck string) bool {
 	startTime := time.Now()
 	buffer := make([]byte, 128)
-	for time.Since(startTime) < 2*time.Second {
+	for time.Since(startTime) < 5*time.Second {
 		n, err := conn.Port.Read(buffer)
 		if err != nil {
 			if err != io.EOF {
@@ -286,7 +286,7 @@ func waitForResponse(conn *SerialConnection, expectedAck string) bool {
 				log.Printf("Received unexpected data from %s: %s", conn.DeviceID, receivedData)
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 	}
 	log.Printf("Timeout waiting for acknowledgment from %s. Received data: %s", conn.DeviceID, conn.Output)
 	return false

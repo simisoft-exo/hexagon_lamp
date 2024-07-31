@@ -22,7 +22,7 @@ enum DeviceState
 // Add these global variables
 DeviceState current_state = UNINITIALIZED;
 unsigned long last_log_time = 0;
-
+unsigned long keep_alive_time = 0;
 // Define a structure for command table entries
 struct CommandEntry
 {
@@ -41,14 +41,12 @@ const CommandEntry command_table[] = {
     {"init", handle_init, UNINITIALIZED},
     {"test", handle_test, WAITING_FOR_COMMAND},
     {"reset", handle_reset, WAITING_FOR_COMMAND}};
-
 const int command_table_size = sizeof(command_table) / sizeof(CommandEntry);
 
 BLDCMotor motor = BLDCMotor(POLE_PAIRS);
 BLDCDriver6PWM driver = BLDCDriver6PWM(A_PHASE_UH, A_PHASE_UL, A_PHASE_VH, A_PHASE_VL, A_PHASE_WH, A_PHASE_WL);
 LowsideCurrentSense current_sense = LowsideCurrentSense(SHUNT_RESISTOR, OPAMP_GAIN, A_OP1_OUT, A_OP2_OUT, A_OP3_OUT);
 MagneticSensorI2C sensor = MagneticSensorI2C(AS5600_I2C);
-
 // include commander interface
 Commander command = Commander(Serial);
 const int RESET_PRESS_DURATION = 3000; // 3 seconds for long press
@@ -203,10 +201,15 @@ void reset_board()
   NVIC_SystemReset();
 }
 
-void setup() {
+void setup()
+{
   Serial.begin(BAUD_RATE);
-  delay(100);
-  while (!Serial.available() || Serial.read() != 'x') {}
+  // Needed for "handshake" with master controller and to persist the connection with the master program
+  // Seems serial port can hang and neither golang, nor arudino IDE serial monitor can reach the program in some states
+  delay(500);
+  while (!Serial.available() || Serial.read() != 'k')
+  {
+  }
   Serial.println("ACK_CONN_OPEN");
   print_device_serial_no();
 }
@@ -364,15 +367,18 @@ void loop()
   switch (current_state)
   {
   case UNINITIALIZED:
-      if (digitalRead(A_BUTTON) == LOW) {
-        Serial.println("Button triggered board init");
-        handle_init();
-      } else if (Serial.available()) {
-        String command = Serial.readStringUntil('\n');
-        command.trim();
-        process_command(command);
-      }
-      break;
+    if (digitalRead(A_BUTTON) == LOW)
+    {
+      Serial.println("Button triggered board init");
+      handle_init();
+    }
+    else if (Serial.available())
+    {
+      String command = Serial.readStringUntil('\n');
+      command.trim();
+      process_command(command);
+    }
+    break;
 
   case INITIALIZING:
     // This state is handled in on_demand_setup()
@@ -403,13 +409,19 @@ void loop()
       serial_command.trim();
       process_command(serial_command);
     }
+    // Add periodic logging
+    unsigned long current_time = millis();
+    if (current_time - last_log_time >= 5000)
+    { // Log every 500ms
+      log_status();
+      last_log_time = current_time;
+    }
     break;
   }
-  // Add periodic logging
+
   unsigned long current_time = millis();
-  if (current_time - last_log_time >= 5000)
-  { // Log every 500ms
-    log_status();
-    last_log_time = current_time;
+  if (current_time - keep_alive_time >= 10000){
+    Serial.println("alive");
+    keep_alive_time = current_time;
   }
 }
