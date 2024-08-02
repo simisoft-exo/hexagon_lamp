@@ -239,6 +239,15 @@ void on_demand_setup()
 
   current_sense.linkDriver(&driver);
 
+  // PID parameters - default 
+  motor.PID_current_q.P = 5;                       
+  motor.PID_current_q.I = 1000;                   
+  motor.PID_current_q.D = 0;
+  motor.PID_current_q.limit = motor.voltage_limit; 
+  motor.PID_current_q.ramp = 1e6;                  
+  // Low pass filtering - default 
+  LPF_current_q.Tf= 0.005;                 
+
   motor.PID_velocity.P = 0.751;
   motor.PID_velocity.I = 2.672;
   motor.PID_velocity.D = 0.00005;
