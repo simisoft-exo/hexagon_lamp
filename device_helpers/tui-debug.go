@@ -35,6 +35,7 @@ var (
 	screen           tcell.Screen
 	inputBuffer      string
 	logFile          *os.File
+	sendToAllBuffer  string
 )
 
 func main() {
@@ -136,33 +137,64 @@ func main() {
 	defer screen.Fini()
 
 	drawScreen()
+        for {
+          switch ev := screen.PollEvent().(type) {
+          case *tcell.EventResize:
+              screen.Sync()
+          case *tcell.EventKey:
+              switch ev.Key() {
+              case tcell.KeyEscape:
+                  return
+              case tcell.KeyEnter:
+                  if currentPortIndex == len(connections) {
+                      sendCommandToAll(sendToAllBuffer)
+                      sendToAllBuffer = ""
+                  } else {
+                      sendCommand(inputBuffer)
+                      inputBuffer = ""
+                  }
+              case tcell.KeyBackspace, tcell.KeyBackspace2:
+                  if currentPortIndex == len(connections) {
+                      if len(sendToAllBuffer) > 0 {
+                          sendToAllBuffer = sendToAllBuffer[:len(sendToAllBuffer)-1]
+                      }
+                  } else {
+                      if len(inputBuffer) > 0 {
+                          inputBuffer = inputBuffer[:len(inputBuffer)-1]
+                      }
+                  }
+              case tcell.KeyTab:
+                  if ev.Modifiers() == tcell.ModShift {
+                      currentPortIndex = (currentPortIndex - 1 + len(connections) + 1) % (len(connections) + 1)
+                  } else {
+                      currentPortIndex = (currentPortIndex + 1) % (len(connections) + 1)
+                  }
+              case tcell.KeyRune:
+                  if ev.Rune() == 'q' && ev.Modifiers() == tcell.ModAlt {
+                      return // Exit when Alt+Q is pressed
+                  }
+                  if currentPortIndex == len(connections) {
+                      sendToAllBuffer += string(ev.Rune())
+                  } else {
+                      inputBuffer += string(ev.Rune())
+                  }
+              }
+          }
+          drawScreen()
+      }
+}
 
-	for {
-		switch ev := screen.PollEvent().(type) {
-		case *tcell.EventResize:
-			screen.Sync()
-		case *tcell.EventKey:
-			switch ev.Key() {
-			case tcell.KeyEscape:
-				return
-			case tcell.KeyEnter:
-				sendCommand(inputBuffer)
-				inputBuffer = ""
-			case tcell.KeyBackspace, tcell.KeyBackspace2:
-				if len(inputBuffer) > 0 {
-					inputBuffer = inputBuffer[:len(inputBuffer)-1]
-				}
-			case tcell.KeyTab:
-				currentPortIndex = (currentPortIndex + 1) % len(connections)
-			case tcell.KeyRune:
-				if ev.Rune() == 'q' && ev.Modifiers() == tcell.ModAlt {
-					return // Exit when Alt+Q is pressed
-				}
-				inputBuffer += string(ev.Rune())
-			}
-		}
-		drawScreen()
-	}
+func sendCommandToAll(command string) {
+    connectionsMutex.Lock()
+    defer connectionsMutex.Unlock()
+
+    log.Printf("Sending command to all devices: %s", command)
+    for _, conn := range connections {
+        _, err := conn.Port.Write([]byte(command + "\n"))
+        if err != nil {
+            log.Printf("Error sending command to %s: %v", conn.DeviceID, err)
+        }
+    }
 }
 
 func openSerialPort(port string) (*SerialConnection, error) {
@@ -350,10 +382,14 @@ func drawScreen() {
 		}
 	}
 
-	// Draw input line
-	inputLine := fmt.Sprintf("> %s", inputBuffer)
-	drawText(0, height-2, width, inputLine)
+        // Draw input line
+        inputLine := fmt.Sprintf("> %s", inputBuffer)
+        drawText(0, height-3, width, inputLine)
 
+        // Draw "Send to All" input line
+        sendToAllLine := fmt.Sprintf("Send to All> %s", sendToAllBuffer)
+        drawText(0, height-2, width, sendToAllLine)
+	
 	// Draw debug info
 	debugInfo := fmt.Sprintf("Connected Devices: %d", len(connections))
 	drawText(0, height-1, width, debugInfo)
