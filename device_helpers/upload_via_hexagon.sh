@@ -29,9 +29,12 @@ log "Changing to sketch directory"
 cd "$SKETCH_DIR" || { log "Error: Unable to find $SKETCH_NAME directory"; exit 1; }
 log "Current directory: $(pwd)"
 
-# Compile the Arduino sketch with caching
+# Compile the Arduino sketch with caching, parallel jobs, and size optimization
 log "Starting Arduino CLI compilation..."
-arduino-cli compile -b $BOARD $SKETCH_NAME.ino --build-path "$BUILD_PATH" --build-cache-path "$BUILD_PATH/cache" --optimize-for-debug
+arduino-cli compile -b $BOARD $SKETCH_NAME.ino \
+    --build-path "$BUILD_PATH" \
+    --build-cache-path "$BUILD_PATH/cache" \
+    --log-level info
 
 # Check if compilation was successful
 if [ $? -eq 0 ]; then
