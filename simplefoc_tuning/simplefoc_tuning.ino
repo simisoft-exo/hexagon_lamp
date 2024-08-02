@@ -15,9 +15,14 @@ enum DeviceState
   UNINITIALIZED,
   INITIALIZING,
   TESTING,
-  WAITING_FOR_COMMAND,
+  WAITING_FOR_CONNECTION,  // New state
+  CONNECTED,               // Rename WAITING_FOR_COMMAND to CONNECTED
   RUNNING
 };
+
+// Add these global variables
+unsigned long last_keepalive_time = 0;
+const unsigned long KEEPALIVE_TIMEOUT = 5000; // 5 seconds
 
 // Add these global variables
 DeviceState current_state = UNINITIALIZED;
@@ -201,17 +206,24 @@ void reset_board()
   NVIC_SystemReset();
 }
 
+void perform_handshake()
+{
+  while (current_state == WAITING_FOR_CONNECTION)
+  {
+    if (Serial.available() && Serial.read() == 'H')
+    {
+      Serial.println("ACK_HANDSHAKE");
+      current_state = CONNECTED;
+      last_keepalive_time = millis();
+    }
+  }
+}
+
 void setup()
 {
   Serial.begin(BAUD_RATE);
-  // Needed for "handshake" with master controller and to persist the connection with the master program
-  // Seems serial port can hang and neither golang, nor arudino IDE serial monitor can reach the program in some states
-  delay(500);
-  while (!Serial.available() || Serial.read() != 'k')
-  {
-  }
-  Serial.println("ACK_CONN_OPEN");
-  print_device_serial_no();
+  current_state = WAITING_FOR_CONNECTION;
+  Serial.println("WAITING_FOR_CONNECTION");
 }
 
 void on_demand_setup()
@@ -358,6 +370,20 @@ void handle_reset()
 
 void loop()
 {
+  if (current_state == WAITING_FOR_CONNECTION)
+  {
+    perform_handshake();
+    return;
+  }
+
+  // Check for keepalive timeout
+  if (millis() - last_keepalive_time > KEEPALIVE_TIMEOUT)
+  {
+    current_state = WAITING_FOR_CONNECTION;
+    Serial.println("DISCONNECTED_TIMEOUT");
+    return;
+  }
+
   switch (button.checkButton())
   {
   case SINGLE_PRESS:
@@ -404,7 +430,7 @@ void loop()
     }
     break;
 
-  case WAITING_FOR_COMMAND:
+  case CONNECTED:
   case RUNNING:
     motor.loopFOC();
     motor.move();
@@ -416,21 +442,16 @@ void loop()
     {
       String serial_command = Serial.readStringUntil('\n');
       serial_command.trim();
-      process_command(serial_command);
+      if (serial_command == "KEEPALIVE")
+      {
+        last_keepalive_time = millis();
+        Serial.println("ACK_KEEPALIVE");
+      }
+      else
+      {
+        process_command(serial_command);
+      }
     }
-    // Add periodic logging
-    unsigned long current_time = millis();
-    if (current_time - last_log_time >= 5000)
-    { // Log every 500ms
-      log_status();
-      last_log_time = current_time;
-    }
-    break;
-  }
-
-  unsigned long current_time = millis();
-  if (current_time - keep_alive_time >= 10000){
-    Serial.println("alive");
-    keep_alive_time = current_time;
+      break;
   }
 }

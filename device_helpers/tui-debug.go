@@ -28,6 +28,10 @@ type SerialConnection struct {
 	PortName string
 }
 
+const (
+	KEEPALIVE_INTERVAL = 3 * time.Second
+)
+
 var (
 	connections      []*SerialConnection
 	connectionsMutex sync.Mutex
@@ -220,23 +224,47 @@ func openSerialPort(port string) (*SerialConnection, error) {
 		PortName: port,
 	}
 
-	// Send an newline character to trigger the Arduino acknowledgment
-	_, err = serialConn.Port.Write([]byte("k"))
+	// Perform handshake
+	_, err = serialConn.Port.Write([]byte("H"))
 	if err != nil {
 		serialConn.Port.Close()
 		return nil, err
 	}
 
-	// Wait for the Arduino acknowledgment
-	ackn := "ACK_CONN_OPEN"
-	if waitForResponse(serialConn, ackn) {
-		log.Printf("Received acknowledgment from Arduino: %s", ackn)
+	// Wait for handshake acknowledgment
+	if waitForResponse(serialConn, "ACK_HANDSHAKE") {
+		log.Printf("Handshake successful with Arduino on port %s", port)
 	} else {
 		serialConn.Port.Close()
-		return nil, fmt.Errorf("Failed to receive acknowledgment from Arduino")
+		return nil, fmt.Errorf("Failed to receive handshake acknowledgment from Arduino")
 	}
 
+	// Start keepalive goroutine
+	go keepAlive(serialConn)
+
 	return serialConn, nil
+}
+
+// Add this new function for keepalive
+func keepAlive(conn *SerialConnection) {
+	ticker := time.NewTicker(KEEPALIVE_INTERVAL)
+	defer ticker.Stop()
+
+	for {
+		<-ticker.C
+		_, err := conn.Port.Write([]byte("KEEPALIVE\n"))
+		if err != nil {
+			log.Printf("Error sending keepalive to %s: %v", conn.DeviceID, err)
+			continue
+		}
+
+		if !waitForResponse(conn, "ACK_KEEPALIVE") {
+			log.Printf("Did not receive keepalive acknowledgment from device %s", conn.DeviceID)
+			// Attempt to reconnect or handle disconnection
+			// This could involve closing the current connection and reopening it
+			// You might want to implement a reconnection mechanism here
+		}
+	}
 }
 
 func readSerialOutput(index int) {
@@ -251,12 +279,16 @@ func readSerialOutput(index int) {
 			if err != io.EOF {
 				log.Printf("Error reading from %s: %v", conn.DeviceID, err)
 			}
+			// Handle disconnection
+			log.Printf("Device %s disconnected, attempting to reconnect...", conn.DeviceID)
+			// Implement reconnection logic here
+			// This could involve closing the current connection and reopening it
 			return
 		}
 		if n > 0 {
-			log.Printf("Received %d bytes from device %s: %s", n, conn.DeviceID, string(buffer[:n]))
-			conn.Output += string(buffer[:n])
-			// ... (keep the existing output trimming code)
+			received := string(buffer[:n])
+			log.Printf("Received %d bytes from device %s: %s", n, conn.DeviceID, received)
+			conn.Output += received
 			drawScreen()
 		}
 	}
