@@ -6,7 +6,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -29,7 +28,7 @@ type SerialConnection struct {
 }
 
 const (
-	KEEPALIVE_INTERVAL = 2 * time.Second
+	HANDSHAKE_INTERVAL = 5 * time.Second
 )
 
 var (
@@ -70,57 +69,39 @@ func main() {
 
 	connections = make([]*SerialConnection, 0, 7)
 
-	for i, device := range devices {
-		log.Printf("Attempting to open device %d: %s", i, device.SerialPort)
-		conn, err := openSerialPort(device.SerialPort)
-		if err != nil {
-			log.Printf("Failed to open %s: %v", device.SerialPort, err)
+	var wg sync.WaitGroup
+	connectionChan := make(chan *SerialConnection, len(devices))
 
-			// List the process using the serial port
-			out, err := exec.Command("sudo", "lsof", device.SerialPort).Output()
+	for _, device := range devices {
+		wg.Add(1)
+		go func(dev DeviceInfo) {
+			defer wg.Done()
+			conn, err := openSerialPort(dev.SerialPort)
 			if err != nil {
-				log.Printf("Failed to list process using %s: %v", device.SerialPort, err)
-				continue
-			}
-			output := string(out)
-			lines := strings.Split(output, "\n")
-			if len(lines) > 1 {
-				fields := strings.Fields(lines[1])
-				if len(fields) > 1 {
-					pid := fields[1]
-					log.Printf("Process using %s: PID %s", device.SerialPort, pid)
-
-					// Kill the process
-					cmd := exec.Command("sudo", "kill", "-9", pid)
-					if err := cmd.Run(); err != nil {
-						log.Printf("Failed to kill process with PID %s: %v", pid, err)
-						continue
-					}
-					log.Printf("Killed process with PID %s", pid)
+				log.Printf("Failed to open %s: %v", dev.SerialPort, err)
+				// Create a partial connection object for reconnection attempts
+				partialConn := &SerialConnection{
+					DeviceID: dev.DeviceID,
+					PortName: dev.SerialPort,
 				}
+				go attemptReconnection(partialConn)
+				return
 			}
+			conn.DeviceID = dev.DeviceID
+			conn.PortName = dev.SerialPort
+			connectionChan <- conn
+		}(device)
+	}
 
-			// Release the serial port
-			cmd := exec.Command("sudo", "fuser", "-k", device.SerialPort)
-			if err := cmd.Run(); err != nil {
-				log.Printf("Failed to release %s: %v", device.SerialPort, err)
-				continue
-			}
-			log.Printf("Released %s", device.SerialPort)
+	go func() {
+		wg.Wait()
+		close(connectionChan)
+	}()
 
-			// Retry opening the serial port
-			conn, err = openSerialPort(device.SerialPort)
-			if err != nil {
-				log.Printf("Failed to open %s after releasing: %v", device.SerialPort, err)
-				continue
-			}
-		}
-		log.Printf("Successfully opened device %d: %s", i, device.SerialPort)
-		conn.DeviceID = device.DeviceID
-		connectionsMutex.Lock()
+	for conn := range connectionChan {
 		connections = append(connections, conn)
-		connectionsMutex.Unlock()
-		go readSerialOutput(len(connections) - 1)
+		go periodicHandshake(conn)
+		go readSerialOutput(conn)
 	}
 
 	if len(connections) == 0 {
@@ -136,11 +117,20 @@ func main() {
 	}
 	defer screen.Fini()
 
+	// Start a goroutine for screen updates
+	updateChan := make(chan struct{})
+	go func() {
+		for range updateChan {
+			drawScreen()
+		}
+	}()
+
 	drawScreen()
 	for {
 		switch ev := screen.PollEvent().(type) {
 		case *tcell.EventResize:
 			screen.Sync()
+			updateChan <- struct{}{}
 		case *tcell.EventKey:
 			switch ev.Key() {
 			case tcell.KeyEscape:
@@ -179,8 +169,171 @@ func main() {
 					inputBuffer += string(ev.Rune())
 				}
 			}
+			updateChan <- struct{}{}
 		}
-		drawScreen()
+	}
+}
+func openSerialPort(port string) (*SerialConnection, error) {
+	var conn *serial.Port
+	var err error
+	for retries := 0; retries < 3; retries++ {
+		config := &serial.Config{
+			Name:        port,
+			Baud:        1000000,
+			ReadTimeout: time.Second * 30, // Increase timeout
+			Size:        8,
+			Parity:      serial.ParityNone,
+			StopBits:    serial.Stop1,
+		}
+		log.Printf("Attempting to open port %s (attempt %d)", port, retries+1)
+		conn, err = serial.OpenPort(config)
+		if err == nil {
+			break
+		}
+		log.Printf("Failed to open port %s: %v. Retrying...", port, err)
+		time.Sleep(time.Second * 2)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("Failed to open port %s after 3 attempts: %v", port, err)
+	}
+
+	serialConn := &SerialConnection{
+		Port:     conn,
+		DeviceID: "", // This will be set later
+		Output:   "",
+		PortName: port,
+	}
+
+	// Clear any existing data in the buffer
+	conn.Flush()
+
+	// Perform initial handshake
+	if err := performHandshake(serialConn); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("Initial handshake failed for port %s: %v", port, err)
+	}
+
+	// Start periodic handshake goroutine
+	go periodicHandshake(serialConn)
+
+	// Start reading output
+	go readSerialOutput(serialConn)
+
+	log.Printf("Successfully opened and initialized port %s", port)
+	return serialConn, nil
+}
+
+func performHandshake(conn *SerialConnection) error {
+	for retries := 0; retries < 3; retries++ {
+		_, err := conn.Port.Write([]byte("HANDSHAKE\n"))
+		if err != nil {
+			log.Printf("Failed to send handshake to %s: %v", conn.PortName, err)
+			continue
+		}
+
+		response, err := waitForAnyResponse(conn, []string{"ACK_HANDSHAKE", "HEARTBEAT"}, 30*time.Second)
+		if err == nil {
+			log.Printf("Received %s from device on port %s", response, conn.PortName)
+			return nil
+		}
+		log.Printf("Handshake attempt %d failed for %s: %v", retries+1, conn.PortName, err)
+		time.Sleep(time.Second * 2)
+	}
+	return fmt.Errorf("Handshake failed after 3 attempts for %s", conn.PortName)
+}
+
+func periodicHandshake(conn *SerialConnection) {
+	ticker := time.NewTicker(HANDSHAKE_INTERVAL)
+	defer ticker.Stop()
+
+	for {
+		<-ticker.C
+		if err := performHandshake(conn); err != nil {
+			log.Printf("Handshake failed for device %s: %v", conn.DeviceID, err)
+			go attemptReconnection(conn)
+			return // Exit this goroutine, as reconnection will start a new one if successful
+		}
+	}
+}
+
+func waitForAnyResponse(conn *SerialConnection, expectedResponses []string, timeout time.Duration) (string, error) {
+	startTime := time.Now()
+	buffer := make([]byte, 128)
+	for time.Since(startTime) < timeout {
+		n, err := conn.Port.Read(buffer)
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("Error reading from %s: %v", conn.DeviceID, err)
+			}
+			return "", err
+		}
+		if n > 0 {
+			receivedData := string(buffer[:n])
+			conn.Output += receivedData
+			log.Printf("Received data from %s: %s", conn.DeviceID, receivedData)
+			for _, expected := range expectedResponses {
+				if strings.Contains(receivedData, expected) {
+					return expected, nil
+				}
+			}
+		}
+	}
+	return "", fmt.Errorf("Timeout waiting for response from %s. Received data: %s", conn.DeviceID, conn.Output)
+}
+
+func readSerialOutput(conn *SerialConnection) {
+	buffer := make([]byte, 128)
+	for {
+		if conn == nil || conn.Port == nil {
+			log.Printf("Connection or port is nil for device %s", conn.DeviceID)
+			go attemptReconnection(conn)
+			return // Exit this goroutine, as reconnection will start a new one if successful
+		}
+
+		n, err := conn.Port.Read(buffer)
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("Error reading from %s: %v", conn.DeviceID, err)
+			}
+			go attemptReconnection(conn)
+			return // Exit this goroutine, as reconnection will start a new one if successful
+		}
+		if n > 0 {
+			received := string(buffer[:n])
+			log.Printf("Received %d bytes from device %s: %s", n, conn.DeviceID, received)
+
+			if strings.Contains(received, "HEARTBEAT") {
+				log.Printf("Heartbeat received from device %s", conn.DeviceID)
+			}
+
+			conn.Output += received
+			if screen != nil {
+				screen.PostEvent(tcell.NewEventInterrupt(nil))
+			}
+		}
+	}
+}
+
+func attemptReconnection(conn *SerialConnection) {
+	for {
+		log.Printf("Attempting to reconnect to %s", conn.PortName)
+		newConn, err := openSerialPort(conn.PortName)
+		if err == nil {
+			newConn.DeviceID = conn.DeviceID
+			connectionsMutex.Lock()
+			for i, c := range connections {
+				if c.DeviceID == conn.DeviceID {
+					connections[i] = newConn
+					break
+				}
+			}
+			connectionsMutex.Unlock()
+			log.Printf("Successfully reconnected to %s", conn.PortName)
+			*conn = *newConn // Update the original connection with the new one
+			return
+		}
+		log.Printf("Failed to reconnect to %s: %v", conn.PortName, err)
+		time.Sleep(time.Second * 30)
 	}
 }
 
@@ -190,7 +343,6 @@ func reconnect(conn *SerialConnection) error {
 	// Close the existing connection if it's still open
 	if conn.Port != nil {
 		conn.Port.Close()
-		conn.Port = nil
 	}
 
 	// Attempt to reopen the port
@@ -210,266 +362,25 @@ func reconnect(conn *SerialConnection) error {
 
 	conn.Port = port
 
-	return establishConnection(conn)
-}
-
-func sendCommandToAll(command string) {
-	connectionsMutex.Lock()
-	defer connectionsMutex.Unlock()
-
-	log.Printf("Sending command to all devices: %s", command)
-	for _, conn := range connections {
-		_, err := conn.Port.Write([]byte(command + "\n"))
-		if err != nil {
-			log.Printf("Error sending command to %s: %v", conn.DeviceID, err)
-		}
-	}
-}
-
-func keepAlive(conn *SerialConnection) {
-	ticker := time.NewTicker(KEEPALIVE_INTERVAL)
-	defer ticker.Stop()
-
-	for {
-		<-ticker.C
-		if conn.Port == nil {
-			log.Printf("Connection lost for device %s, stopping keepalive", conn.DeviceID)
-			return
-		}
-		_, err := conn.Port.Write([]byte("KEEPALIVE\n"))
-		if err != nil {
-			log.Printf("Error sending keepalive to %s: %v", conn.DeviceID, err)
-			if err := reconnect(conn); err != nil {
-				log.Printf("Reconnection failed for device %s: %v", conn.DeviceID, err)
-				time.Sleep(1 * time.Second) // Wait before next reconnection attempt
-			} else {
-				log.Printf("Reconnection successful for device %s", conn.DeviceID)
-			}
-			continue
-		}
-
-		response, err := waitForAnyResponse(conn, []string{"ACK_KEEPALIVE", "HEARTBEAT"}, 2*time.Second)
-		if err != nil {
-			log.Printf("Did not receive keepalive acknowledgment from device %s: %v", conn.DeviceID, err)
-			if err := reconnect(conn); err != nil {
-				log.Printf("Reconnection failed for device %s: %v", conn.DeviceID, err)
-				time.Sleep(5 * time.Second) // Wait before next reconnection attempt
-			} else {
-				log.Printf("Reconnection successful for device %s", conn.DeviceID)
-			}
-		} else {
-			log.Printf("Received %s from device %s", response, conn.DeviceID)
-		}
-	}
-}
-
-func openSerialPort(port string) (*SerialConnection, error) {
-	config := &serial.Config{
-		Name:        port,
-		Baud:        1000000,
-		ReadTimeout: time.Second * 10,
-		Size:        8,
-		Parity:      serial.ParityNone,
-		StopBits:    serial.Stop1,
-	}
-	log.Printf("Opening port %s with config: %+v", port, config)
-	conn, err := serial.OpenPort(config)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create a SerialConnection
-	serialConn := &SerialConnection{
-		Port:     conn,
-		DeviceID: "", // Set the appropriate device ID
-		Output:   "",
-		PortName: port,
-	}
-
-	// Perform handshake
-	_, err = serialConn.Port.Write([]byte("HANDSHAKE\n"))
-	if err != nil {
-		serialConn.Port.Close()
-		return nil, fmt.Errorf("Failed to send handshake: %v", err)
-	}
-
-	// Wait for handshake acknowledgment, WAITING_FOR_CONNECTION, or HEARTBEAT
-	for attempts := 0; attempts < 3; attempts++ {
-		response, err := waitForAnyResponse(serialConn, []string{"ACK_HANDSHAKE", "WAITING_FOR_CONNECTION", "HEARTBEAT"}, 5*time.Second)
-		if err != nil {
-			log.Printf("Error waiting for response: %v", err)
-			continue
-		}
-
-		switch response {
-		case "ACK_HANDSHAKE":
-			log.Printf("Handshake successful with Arduino on port %s", port)
-			// Start keepalive goroutine
-			go keepAlive(serialConn)
-			return serialConn, nil
-		case "WAITING_FOR_CONNECTION":
-			log.Printf("Device on port %s is waiting for connection, attempting to reconnect...", port)
-			if err := reconnect(serialConn); err != nil {
-				log.Printf("Failed to reconnect to device on port %s: %v", port, err)
-				continue
-			}
-			// Start keepalive goroutine
-			go keepAlive(serialConn)
-			return serialConn, nil
-		case "HEARTBEAT":
-			log.Printf("Device on port %s is sending heartbeat, attempting to establish connection...", port)
-			if err := establishConnection(serialConn); err != nil {
-				log.Printf("Failed to establish connection with device on port %s: %v", port, err)
-				continue
-			}
-			// Start keepalive goroutine
-			go keepAlive(serialConn)
-			return serialConn, nil
-		}
-	}
-
-	serialConn.Port.Close()
-	return nil, fmt.Errorf("Failed to establish connection with Arduino on port %s", port)
-}
-
-func establishConnection(conn *SerialConnection) error {
-	// Perform handshake
-	_, err := conn.Port.Write([]byte("HANDSHAKE\n"))
-	if err != nil {
-		conn.Port.Close()
-		return fmt.Errorf("Failed to send handshake: %v", err)
-	}
-
-	// Wait for handshake acknowledgment, WAITING_FOR_CONNECTION, or HEARTBEAT
-	for attempts := 0; attempts < 3; attempts++ {
-		response, err := waitForAnyResponse(conn, []string{"ACK_HANDSHAKE", "WAITING_FOR_CONNECTION", "HEARTBEAT"}, 5*time.Second)
-		if err != nil {
-			log.Printf("Error waiting for response: %v", err)
-			continue
-		}
-
-		switch response {
-		case "ACK_HANDSHAKE":
-			log.Printf("Handshake successful for device %s on port %s", conn.DeviceID, conn.PortName)
-			return nil
-		case "WAITING_FOR_CONNECTION":
-			log.Printf("Device %s on port %s is still waiting for connection, retrying...", conn.DeviceID, conn.PortName)
-			time.Sleep(time.Second)
-			continue
-		case "HEARTBEAT":
-			log.Printf("Device %s on port %s is sending heartbeat, connection established", conn.DeviceID, conn.PortName)
-			return nil
-		}
-	}
-
-	return fmt.Errorf("Failed to establish connection with device %s on port %s", conn.DeviceID, conn.PortName)
-}
-
-func waitForAnyResponse(conn *SerialConnection, expectedResponses []string, timeout time.Duration) (string, error) {
-	startTime := time.Now()
-	buffer := make([]byte, 128)
-	for time.Since(startTime) < timeout {
-		if conn.Port == nil {
-			return "", fmt.Errorf("Connection lost")
-		}
-		n, err := conn.Port.Read(buffer)
-		if err != nil {
-			if err != io.EOF {
-				log.Printf("Error reading from %s: %v", conn.DeviceID, err)
-			}
-			return "", err
-		}
-		if n > 0 {
-			receivedData := string(buffer[:n])
-			conn.Output += receivedData
-			log.Printf("Received data from %s: %s", conn.DeviceID, receivedData)
-			for _, expected := range expectedResponses {
-				if strings.Contains(conn.Output, expected) {
-					return expected, nil
-				}
-			}
-			// Check for partial matches
-			for _, expected := range expectedResponses {
-				if strings.HasPrefix(expected, conn.Output) {
-					return expected, nil
-				}
-			}
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	return "", fmt.Errorf("Timeout waiting for response from %s. Received data: %s", conn.DeviceID, conn.Output)
-}
-
-func readSerialOutput(index int) {
-	connectionsMutex.Lock()
-	conn := connections[index]
-	connectionsMutex.Unlock()
-
-	buffer := make([]byte, 128)
-	for {
-		if conn.Port == nil {
-			log.Printf("Connection lost for device %s, attempting to reconnect...", conn.DeviceID)
-			if err := reconnect(conn); err != nil {
-				log.Printf("Reconnection failed for device %s: %v", conn.DeviceID, err)
-				time.Sleep(5 * time.Second) // Wait before next reconnection attempt
-				continue
-			}
-		}
-
-		n, err := conn.Port.Read(buffer)
-		if err != nil {
-			if err != io.EOF {
-				log.Printf("Error reading from %s: %v", conn.DeviceID, err)
-			}
-			conn.Port = nil // Mark connection as lost
-			continue
-		}
-		if n > 0 {
-			received := string(buffer[:n])
-			log.Printf("Received %d bytes from device %s: %s", n, conn.DeviceID, received)
-
-			if strings.Contains(received, "WAITING_FOR_CONNECTION") {
-				log.Printf("Device %s is waiting for connection, attempting to reconnect...", conn.DeviceID)
-				conn.Port = nil // Mark connection as lost
-				continue
-			}
-
-			conn.Output += received
-			drawScreen()
-		}
-	}
-}
-
-func attemptReconnection(conn *SerialConnection) {
-	log.Printf("Device %s disconnected, attempting to reconnect...", conn.DeviceID)
-	for {
-		if err := reconnect(conn); err != nil {
-			log.Printf("Reconnection failed for device %s: %v", conn.DeviceID, err)
-			time.Sleep(5 * time.Second) // Wait before next reconnection attempt
-		} else {
-			log.Printf("Reconnection successful for device %s", conn.DeviceID)
-			break
-		}
-	}
+	return performHandshake(conn)
 }
 
 func sendInitialCommands(conn *SerialConnection) {
 	commands := []string{"init"}
 	for _, cmd := range commands {
 		sendCommandWithRetry(conn, cmd, 3) // Try each command up to 3 times
-		// time.Sleep(time.Second * 1)        // Wait between commands
 
 		// Wait for acknowledgements
-		initializingAck := fmt.Sprintf("ACK_INIT")
-		waitingForCommandAck := fmt.Sprintf("ACK_RUNNING")
+		initializingAck := "ACK_INIT"
+		waitingForCommandAck := "ACK_RUNNING"
 
 		if !waitForResponse(conn, initializingAck) {
 			log.Printf("Did not receive INITIALIZING acknowledgement from device %s", conn.DeviceID)
-			return
+			continue // Try the next command instead of returning
 		}
 		if !waitForResponse(conn, waitingForCommandAck) {
 			log.Printf("Did not receive RUNNING acknowledgement from device %s", conn.DeviceID)
-			return
+			continue // Try the next command instead of returning
 		}
 	}
 }
@@ -483,8 +394,7 @@ func sendCommandWithRetry(conn *SerialConnection, command string, retries int) {
 			time.Sleep(time.Second) // Wait before retry
 			continue
 		}
-
-		time.Sleep(time.Second) // Wait before retry
+		return // Command sent successfully
 	}
 	log.Printf("Command %s failed after %d attempts for device %s", command, retries, conn.DeviceID)
 }
@@ -492,7 +402,7 @@ func sendCommandWithRetry(conn *SerialConnection, command string, retries int) {
 func waitForResponse(conn *SerialConnection, expectedAck string) bool {
 	startTime := time.Now()
 	buffer := make([]byte, 128)
-	for time.Since(startTime) < 5*time.Second {
+	for time.Since(startTime) < 10*time.Second {
 		n, err := conn.Port.Read(buffer)
 		if err != nil {
 			if err != io.EOF {
@@ -505,6 +415,16 @@ func waitForResponse(conn *SerialConnection, expectedAck string) bool {
 			conn.Output += receivedData
 			if strings.Contains(conn.Output, expectedAck) {
 				return true
+			} else if strings.Contains(conn.Output, "FOC_STATUS:") {
+				status := strings.TrimSpace(strings.Split(conn.Output, "FOC_STATUS:")[1])
+				log.Printf("FOC Status for device %s: %s", conn.DeviceID, status)
+				if status != "MOT_INIT" {
+					log.Printf("FOC initialization did not result in MOTOR_READY status for device %s", conn.DeviceID)
+					return false
+				}
+			} else if strings.Contains(conn.Output, "INIT_FAILED") {
+				log.Printf("Initialization failed for device %s", conn.DeviceID)
+				return false
 			} else {
 				log.Printf("Received unexpected data from %s: %s", conn.DeviceID, receivedData)
 			}
@@ -513,6 +433,19 @@ func waitForResponse(conn *SerialConnection, expectedAck string) bool {
 	}
 	log.Printf("Timeout waiting for acknowledgment from %s. Received data: %s", conn.DeviceID, conn.Output)
 	return false
+}
+
+func sendCommandToAll(command string) {
+	connectionsMutex.Lock()
+	defer connectionsMutex.Unlock()
+
+	log.Printf("Sending command to all devices: %s", command)
+	for _, conn := range connections {
+		_, err := conn.Port.Write([]byte(command + "\n"))
+		if err != nil {
+			log.Printf("Error sending command to %s: %v", conn.DeviceID, err)
+		}
+	}
 }
 
 func sendCommand(command string) {

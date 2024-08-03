@@ -16,39 +16,36 @@ enum DeviceState
   RUNNING
 };
 
-enum ConnectionState
-{
-  WAITING_FOR_CONNECTION,
-  CONNECTED
-};
-
-unsigned long last_keepalive_time = 0;
-const unsigned long KEEPALIVE_TIMEOUT = 30 * 1000; // 60 seconds
-
 unsigned long last_heartbeat_time = 0;
-const unsigned long HEARTBEAT_PERIOD = 5 * 1000; // 10 seconds
+const unsigned long HEARTBEAT_PERIOD = 5 * 1000; // 5 seconds
+
 
 DeviceState current_device_state = UNINITIALIZED;
-ConnectionState current_connection_state = WAITING_FOR_CONNECTION;
 
 struct CommandEntry
 {
   const char *command;
   void (*function)();
-  DeviceState required_state;
 };
 
-void keepalive();
-void ack_alive();
+void heartbeat()
+{
+  if(current_device_state == RUNNING)
+  {
+    Serial.println("HEARTBEAT");
+    last_heartbeat_time = millis();
+  }
+}
+
+
 void ack_handshake();
 void handle_init();
 void handle_reset();
 
 const CommandEntry command_table[] = {
-    {"init", handle_init, UNINITIALIZED},
-    {"keepalive", ack_alive, RUNNING},
-    {"handshake", ack_handshake, RUNNING},
-    {"reset", handle_reset, RUNNING}
+    {"init", handle_init},
+    {"handshake", ack_handshake},
+    {"reset", handle_reset}
 };
 const int command_table_size = sizeof(command_table) / sizeof(CommandEntry);
 
@@ -57,7 +54,6 @@ BLDCDriver6PWM driver = BLDCDriver6PWM(A_PHASE_UH, A_PHASE_UL, A_PHASE_VH, A_PHA
 LowsideCurrentSense current_sense = LowsideCurrentSense(SHUNT_RESISTOR, OPAMP_GAIN, A_OP1_OUT, A_OP2_OUT, A_OP3_OUT);
 MagneticSensorI2C sensor = MagneticSensorI2C(AS5600_I2C);
 Commander command = Commander(Serial);
-
 
 void do_motor(char *cmd)
 {
@@ -68,7 +64,7 @@ void do_motor(char *cmd)
   command.motor(&motor, cmd);
 
   SimpleFOCDebug::print("ACK_MOTOR: ");
-  SimpleFOCDebug::println(cmd_copy);
+  Serial.println(cmd_copy);
 }
 
 void print_device_serial_no()
@@ -76,28 +72,12 @@ void print_device_serial_no()
   char serial[25];
   uint32_t *uniqueId = (uint32_t *)0x1FFF7590;
   sprintf(serial, "%08lX%08lX%08lX", uniqueId[2], uniqueId[1], uniqueId[0]);
-  SimpleFOCDebug::print("SERIAL_NO ");
-  SimpleFOCDebug::println(serial);
-}
-
-void keepalive(){
-  last_keepalive_time = millis();
-}
-
-void heartbeat(){
-  last_heartbeat_time = millis();
-  Serial.println("HEARTBEAT");
-}
-
-void ack_alive(){
-  keepalive();
-  Serial.println("ACK_KEEPALIVE");
+  Serial.println("SERIAL_NO ");
+  Serial.println(serial);
 }
 
 void ack_handshake(){
   Serial.println("ACK_HANDSHAKE");
-  current_connection_state = CONNECTED;
-  keepalive();
 }
 
 void reset_board()
@@ -107,45 +87,45 @@ void reset_board()
   NVIC_SystemReset();
 }
 
-void wait_for_handshake() {
-  static String buffer = "";
-  unsigned long startTime = millis();
-  while (millis() - startTime < 5000) { // 5-second timeout
-    while (Serial.available() > 0) {
-      char inChar = (char)Serial.read();
-      buffer += inChar;
-      if (buffer.indexOf("HANDSHAKE") != -1) {
-        Serial.println("ACK_HANDSHAKE");
-        current_connection_state = CONNECTED;
-        keepalive();
-        buffer = "";  // Clear the buffer
-        return;
-      }
-      // Trim the buffer if it gets too long without finding a match
-      if (buffer.length() > 20) {
-        buffer = buffer.substring(buffer.length() - 10);
-      }
-    }
-    delay(10); // Small delay to prevent tight looping
-  }
-  Serial.println("WAITING_FOR_CONNECTION");
-}
-
 void setup()
 {
   Serial.begin(BAUD_RATE);
   current_device_state = UNINITIALIZED;
-  current_connection_state = WAITING_FOR_CONNECTION;
+  pinMode(A_BUTTON, INPUT_PULLUP);
   while (!Serial) {
     ; // wait for serial port to connect. Needed for native USB port only
   }
-  Serial.println("WAITING_FOR_CONNECTION");
+  SimpleFOCDebug::enable(&Serial);
+  Serial.print("SETUP_DONE");
 }
 
-void on_demand_setup()
+
+String interpretFOCStatus(FOCMotorStatus status) {
+  switch(status) {
+    case FOCMotorStatus::motor_uninitialized:
+      return "MOTOR_UNINITIALIZED";
+    case FOCMotorStatus::motor_initializing:
+      return "MOTOR_INITIALIZING";
+    case FOCMotorStatus::motor_uncalibrated:
+      return "MOTOR_UNCALIBRATED";
+    case FOCMotorStatus::motor_calibrating:
+      return "MOTOR_CALIBRATING";
+    case FOCMotorStatus::motor_ready:
+      return "MOTOR_READY";
+    case FOCMotorStatus::motor_error:
+      return "MOTOR_ERROR";
+    case FOCMotorStatus::motor_calib_failed:
+      return "MOTOR_CALIB_FAILED";
+    case FOCMotorStatus::motor_init_failed:
+      return "MOTOR_INIT_FAILED";
+    default:
+      return "UNKNOWN_STATUS";
+  }
+}
+
+bool on_demand_setup()
 {
   Wire.setClock(WIRE_FREQ);
-  SimpleFOCDebug::enable();
 
   motor.useMonitoring(Serial);
 
@@ -154,8 +134,10 @@ void on_demand_setup()
   motor.current_limit = 1;
 
   driver.pwm_frequency = DRIVER_PWM_FREQ;
+  
   sensor.init();
   driver.init();
+
   motor.linkSensor(&sensor);
   motor.linkDriver(&driver);
 
@@ -178,38 +160,44 @@ void on_demand_setup()
 
   motor.init();
   current_sense.init();
+
   motor.linkCurrentSense(&current_sense);
 
   motor.monitor_variables = 0;
 
   motor.initFOC();
 
+  String status_str = interpretFOCStatus(motor.motor_status);
+
+  if (motor.motor_status != FOCMotorStatus::motor_ready) {
+    Serial.println("INIT_FAILED");
+    return false;
+  }
+
   command.add('M', do_motor, (char *)"motor");
 
-  Serial.print("INIT_FINISHED: ");
+  Serial.print("MOT_READY");
   print_device_serial_no();
+  return true;
 }
 
-void process_command(const String &cmd)
-{
-  for (const auto &entry : command_table)
-  {
-    if (cmd.equalsIgnoreCase(entry.command))
-    {
-      if (current_device_state == entry.required_state || entry.required_state == RUNNING)
-      {
-        entry.function();
-      }
-      else
-      {
-        Serial.println("COMMAND_NOT_ALLOWED");
-      }
-      return;
+void process_command(const String &cmd) {
+  Serial.println(cmd);
+  bool commandFound = false;
+
+  for (const auto &entry : command_table) {
+    if (cmd.equalsIgnoreCase(entry.command)) {
+      entry.function();
+      commandFound = true;
+      break;  // Exit the loop after finding and executing the command
     }
   }
-  Serial.print("UNKNOWN_COMMAND:");
-  Serial.println(cmd);
-  keepalive();
+
+  // If we've gone through all entries without finding a match, it's an unknown command
+  if (!commandFound) {
+    Serial.print("UNKNOWN_CMD:");
+    Serial.println(cmd);
+  }
 }
 
 void handle_init()
@@ -218,13 +206,19 @@ void handle_init()
   {
     Serial.println("ACK_INIT");
     current_device_state = INITIALIZING;
-    on_demand_setup();
-    Serial.println("ACK_RUNNING");
-    current_device_state = RUNNING;
+    if (on_demand_setup())
+    {
+      Serial.println("ACK_RUNNING");
+      current_device_state = RUNNING;
+    }
+    else
+    {
+      current_device_state = UNINITIALIZED;
+    }
   }
   else
   {
-    Serial.println("Board is already initialized");
+    Serial.println("ALREADY_INITED");
   }
 }
 
@@ -257,29 +251,15 @@ void handle_active_state()
 
   if (Serial.available())
   {
+    Serial.print("active state calling: ");
     String serial_command = Serial.readStringUntil('\n');
+    Serial.println(serial_command);
     process_command(serial_command);
   }
 }
 
 void loop()
 {
-  switch (current_connection_state)
-  {
-    case WAITING_FOR_CONNECTION:
-      wait_for_handshake();
-      return;
-
-    case CONNECTED:
-      if (millis() - last_keepalive_time > KEEPALIVE_TIMEOUT)
-      {
-        current_connection_state = WAITING_FOR_CONNECTION;
-        Serial.println("WAITING_FOR_CONNECTION");
-        return;
-      }
-      break;
-  }
-
   switch (current_device_state)
   {
     case UNINITIALIZED:
