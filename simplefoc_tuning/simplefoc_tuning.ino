@@ -1,5 +1,6 @@
 #include <SimpleFOC.h>
-#include <Wire.h>
+#include "SimpleFOCDrivers.h"
+#include "utilities/stm32math/STM32G4CORDICTrigFunctions.h"
 
 
 #define BAUD_RATE 1000000
@@ -17,7 +18,7 @@ enum DeviceState
 };
 
 unsigned long last_heartbeat_time = 0;
-const unsigned long HEARTBEAT_PERIOD = 5 * 1000; // 5 seconds
+const unsigned long HEARTBEAT_PERIOD = 15 * 1000; // 5 seconds
 
 
 DeviceState current_device_state = UNINITIALIZED;
@@ -41,13 +42,12 @@ void heartbeat()
 void ack_handshake();
 void handle_init();
 void handle_reset();
+void print_device_serial_no();
 
-const CommandEntry command_table[] = {
-    {"init", handle_init},
-    {"handshake", ack_handshake},
-    {"reset", handle_reset}
-};
-const int command_table_size = sizeof(command_table) / sizeof(CommandEntry);
+void doHandshake(char* cmd) { ack_handshake(); }
+void doInit(char* cmd) { handle_init(); }
+void doReset(char* cmd) { handle_reset(); }
+void doSerialNo(char* cmd) { print_device_serial_no(); }
 
 BLDCMotor motor = BLDCMotor(POLE_PAIRS);
 BLDCDriver6PWM driver = BLDCDriver6PWM(A_PHASE_UH, A_PHASE_UL, A_PHASE_VH, A_PHASE_VL, A_PHASE_WH, A_PHASE_WL);
@@ -67,17 +67,23 @@ void do_motor(char *cmd)
   Serial.println(cmd_copy);
 }
 
-void print_device_serial_no()
-{
+String get_serial_number() {
   char serial[25];
   uint32_t *uniqueId = (uint32_t *)0x1FFF7590;
   sprintf(serial, "%08lX%08lX%08lX", uniqueId[2], uniqueId[1], uniqueId[0]);
-  Serial.println("SERIAL_NO ");
+  return String(serial);
+}
+
+void print_device_serial_no() {
+  String serial = get_serial_number();
+  Serial.println("SERIAL_NO:");
   Serial.println(serial);
 }
 
-void ack_handshake(){
-  Serial.println("ACK_HANDSHAKE");
+void ack_handshake() {
+  // String serial = get_serial_number();
+  Serial.println("ACK");
+  // Serial.println(serial);
 }
 
 void reset_board()
@@ -96,6 +102,10 @@ void setup()
     ; // wait for serial port to connect. Needed for native USB port only
   }
   SimpleFOCDebug::enable(&Serial);
+  command.add('H', doHandshake, "handshake");
+  command.add('I', doInit, "init");
+  command.add('R', doReset, "reset");
+  command.add('S', doSerialNo, "serial_no");
   Serial.print("SETUP_DONE");
 }
 
@@ -126,7 +136,7 @@ String interpretFOCStatus(FOCMotorStatus status) {
 bool on_demand_setup()
 {
   Wire.setClock(WIRE_FREQ);
-
+  SimpleFOC_CORDIC_Config();
   motor.useMonitoring(Serial);
 
   driver.voltage_power_supply = 12;
@@ -175,29 +185,11 @@ bool on_demand_setup()
   }
 
   command.add('M', do_motor, (char *)"motor");
+ 
 
-  Serial.print("MOT_READY");
+  Serial.println(status_str);
   print_device_serial_no();
   return true;
-}
-
-void process_command(const String &cmd) {
-  Serial.println(cmd);
-  bool commandFound = false;
-
-  for (const auto &entry : command_table) {
-    if (cmd.equalsIgnoreCase(entry.command)) {
-      entry.function();
-      commandFound = true;
-      break;  // Exit the loop after finding and executing the command
-    }
-  }
-
-  // If we've gone through all entries without finding a match, it's an unknown command
-  if (!commandFound) {
-    Serial.print("UNKNOWN_CMD:");
-    Serial.println(cmd);
-  }
 }
 
 void handle_init()
@@ -234,12 +226,9 @@ void handle_uninitialized_state()
     Serial.println("BUTTON_INIT");
     handle_init();
   }
-  else if (Serial.available())
-  {
-    String command = Serial.readStringUntil('\n');
-    command.trim();
-    process_command(command);
-  }
+
+  command.run();
+
 }
 
 void handle_active_state()
@@ -248,14 +237,6 @@ void handle_active_state()
   motor.move();
   motor.monitor();
   command.run();
-
-  if (Serial.available())
-  {
-    Serial.print("active state calling: ");
-    String serial_command = Serial.readStringUntil('\n');
-    Serial.println(serial_command);
-    process_command(serial_command);
-  }
 }
 
 void loop()

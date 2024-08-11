@@ -31,6 +31,16 @@ const (
 	HANDSHAKE_INTERVAL = 5 * time.Second
 )
 
+type ScreenUpdate struct {
+	DeviceID string
+	Output   string
+}
+
+var (
+	screenUpdateChan    = make(chan ScreenUpdate, 100) // Buffer for 100 updates
+	screenRefreshTicker *time.Ticker
+)
+
 var (
 	connections      []*SerialConnection
 	connectionsMutex sync.Mutex
@@ -79,7 +89,6 @@ func main() {
 			conn, err := openSerialPort(dev.SerialPort)
 			if err != nil {
 				log.Printf("Failed to open %s: %v", dev.SerialPort, err)
-				// Create a partial connection object for reconnection attempts
 				partialConn := &SerialConnection{
 					DeviceID: dev.DeviceID,
 					PortName: dev.SerialPort,
@@ -117,59 +126,63 @@ func main() {
 	}
 	defer screen.Fini()
 
-	// Start a goroutine for screen updates
-	updateChan := make(chan struct{})
-	go func() {
-		for range updateChan {
-			drawScreen()
-		}
-	}()
+	// Start the screen update goroutine
+	go screenUpdateLoop()
+
+	// Start the screen refresh ticker
+	screenRefreshTicker = time.NewTicker(100 * time.Millisecond)
+	defer screenRefreshTicker.Stop()
 
 	drawScreen()
 	for {
-		switch ev := screen.PollEvent().(type) {
-		case *tcell.EventResize:
-			screen.Sync()
-			updateChan <- struct{}{}
-		case *tcell.EventKey:
-			switch ev.Key() {
-			case tcell.KeyEscape:
-				return
-			case tcell.KeyEnter:
-				if currentPortIndex == len(connections) {
-					sendCommandToAll(sendToAllBuffer)
-					sendToAllBuffer = ""
-				} else {
-					sendCommand(inputBuffer)
-					inputBuffer = ""
-				}
-			case tcell.KeyBackspace, tcell.KeyBackspace2:
-				if currentPortIndex == len(connections) {
-					if len(sendToAllBuffer) > 0 {
-						sendToAllBuffer = sendToAllBuffer[:len(sendToAllBuffer)-1]
+		select {
+		case <-screenRefreshTicker.C:
+			drawScreen()
+		default:
+			switch ev := screen.PollEvent().(type) {
+			case *tcell.EventResize:
+				screen.Sync()
+				drawScreen()
+			case *tcell.EventKey:
+				switch ev.Key() {
+				case tcell.KeyEscape:
+					return
+				case tcell.KeyEnter:
+					if currentPortIndex == len(connections) {
+						sendCommandToAll(sendToAllBuffer)
+						sendToAllBuffer = ""
+					} else {
+						sendCommand(inputBuffer)
+						inputBuffer = ""
 					}
-				} else {
-					if len(inputBuffer) > 0 {
-						inputBuffer = inputBuffer[:len(inputBuffer)-1]
+				case tcell.KeyBackspace, tcell.KeyBackspace2:
+					if currentPortIndex == len(connections) {
+						if len(sendToAllBuffer) > 0 {
+							sendToAllBuffer = sendToAllBuffer[:len(sendToAllBuffer)-1]
+						}
+					} else {
+						if len(inputBuffer) > 0 {
+							inputBuffer = inputBuffer[:len(inputBuffer)-1]
+						}
+					}
+				case tcell.KeyTab:
+					if ev.Modifiers() == tcell.ModShift {
+						currentPortIndex = (currentPortIndex - 1 + len(connections) + 1) % (len(connections) + 1)
+					} else {
+						currentPortIndex = (currentPortIndex + 1) % (len(connections) + 1)
+					}
+				case tcell.KeyRune:
+					if ev.Rune() == 'q' && ev.Modifiers() == tcell.ModAlt {
+						return // Exit when Alt+Q is pressed
+					}
+					if currentPortIndex == len(connections) {
+						sendToAllBuffer += string(ev.Rune())
+					} else {
+						inputBuffer += string(ev.Rune())
 					}
 				}
-			case tcell.KeyTab:
-				if ev.Modifiers() == tcell.ModShift {
-					currentPortIndex = (currentPortIndex - 1 + len(connections) + 1) % (len(connections) + 1)
-				} else {
-					currentPortIndex = (currentPortIndex + 1) % (len(connections) + 1)
-				}
-			case tcell.KeyRune:
-				if ev.Rune() == 'q' && ev.Modifiers() == tcell.ModAlt {
-					return // Exit when Alt+Q is pressed
-				}
-				if currentPortIndex == len(connections) {
-					sendToAllBuffer += string(ev.Rune())
-				} else {
-					inputBuffer += string(ev.Rune())
-				}
+				drawScreen()
 			}
-			updateChan <- struct{}{}
 		}
 	}
 }
@@ -225,13 +238,13 @@ func openSerialPort(port string) (*SerialConnection, error) {
 
 func performHandshake(conn *SerialConnection) error {
 	for retries := 0; retries < 3; retries++ {
-		_, err := conn.Port.Write([]byte("HANDSHAKE\n"))
+		_, err := conn.Port.Write([]byte("H\n"))
 		if err != nil {
 			log.Printf("Failed to send handshake to %s: %v", conn.PortName, err)
 			continue
 		}
 
-		response, err := waitForAnyResponse(conn, []string{"ACK_HANDSHAKE", "HEARTBEAT"}, 30*time.Second)
+		response, err := waitForAnyResponse(conn, []string{"ACK", "HEARTBEAT"}, 30*time.Second)
 		if err == nil {
 			log.Printf("Received %s from device on port %s", response, conn.PortName)
 			return nil
@@ -306,9 +319,12 @@ func readSerialOutput(conn *SerialConnection) {
 				log.Printf("Heartbeat received from device %s", conn.DeviceID)
 			}
 
-			conn.Output += received
-			if screen != nil {
-				screen.PostEvent(tcell.NewEventInterrupt(nil))
+			// Send update to channel
+			select {
+			case screenUpdateChan <- ScreenUpdate{DeviceID: conn.DeviceID, Output: received}:
+			default:
+				// Channel is full, log a warning
+				log.Printf("Warning: Screen update channel is full. Update for device %s dropped.", conn.DeviceID)
 			}
 		}
 	}
@@ -549,4 +565,33 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+const maxOutputLines = 100
+
+func limitOutputBuffer(output string) string {
+	lines := strings.Split(output, "\n")
+	if len(lines) > maxOutputLines {
+		lines = lines[len(lines)-maxOutputLines:]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func screenUpdateLoop() {
+	for {
+		select {
+		case update := <-screenUpdateChan:
+			// Update the connection's output
+			connectionsMutex.Lock()
+			for _, conn := range connections {
+				if conn.DeviceID == update.DeviceID {
+					conn.Output = limitOutputBuffer(conn.Output + update.Output)
+					break
+				}
+			}
+			connectionsMutex.Unlock()
+		case <-screenRefreshTicker.C:
+			drawScreen()
+		}
+	}
 }
