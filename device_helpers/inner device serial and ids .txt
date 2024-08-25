@@ -1,0 +1,24 @@
+`
+Device ID: 1, Port: /dev/ttyACM1, Output Length: 1262
+SERIAL_NO:
+20343932534B50020064003B
+
+Device ID: 0, Port: /dev/ttyACM0, Output Length: 1258
+SERIAL_NO:
+20343932534B500200270040
+
+Device ID: 3, Port: /dev/ttyACM3, Output Length: 1458
+SERIAL_NO:
+20343932534B500200630027
+
+Device ID: 5, Port: /dev/ttyACM5, Output Length: 1440
+SERIAL_NO:
+2039323050525001001B004C
+
+Device ID: 4, Port: /dev/ttyACM4, Output Length: 1186
+SERIAL_NO:
+20393230505250010064004B
+
+Device ID: 6, Port: /dev/ttyACM6, Output Length: 1307
+20343932534B500200270035
+`

@@ -1,0 +1,18 @@
+FROM --platform=$BUILDPLATFORM golang:1.23 AS builder
+
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+ARG SUBFOLDER
+ARG GO_MAIN
+ARG EXECUTABLE_NAME
+
+WORKDIR /go/src/app
+
+COPY . .
+
+RUN echo "Building on $BUILDPLATFORM, targeting $TARGETPLATFORM" && \
+    cd $SUBFOLDER && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /$EXECUTABLE_NAME ./$GO_MAIN
+
+FROM scratch
+COPY --from=builder /$EXECUTABLE_NAME .
