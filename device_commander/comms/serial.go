@@ -1,14 +1,20 @@
-package main
+package comms
 
 import (
 	"fmt"
 	"io"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tarm/serial"
 )
+
+type ScreenUpdate struct {
+	DeviceID string
+	Output   string
+}
 
 const (
 	HANDSHAKE_INTERVAL = 5 * time.Second
@@ -27,7 +33,7 @@ type SerialConnection struct {
 	PortName string
 }
 
-func openSerialPort(port string) (*SerialConnection, error) {
+func OpenSerialPort(port string, connections []*SerialConnection, connectionsMutex *sync.Mutex) (*SerialConnection, error) {
 	var conn *serial.Port
 	var err error
 	for retries := 0; retries < 3; retries++ {
@@ -62,22 +68,25 @@ func openSerialPort(port string) (*SerialConnection, error) {
 	conn.Flush()
 
 	// Perform initial handshake
-	if err := performHandshake(serialConn); err != nil {
+	if err := PerformHandshake(serialConn); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("initial handshake failed for port %s: %v", port, err)
 	}
 
 	// Start periodic handshake goroutine
-	go periodicHandshake(serialConn)
+	go PeriodicHandshake(serialConn, connections, connectionsMutex)
+
+	// Create a channel for screen updates
+	screenUpdateChan := make(chan ScreenUpdate, 100)
 
 	// Start reading output
-	go readSerialOutput(serialConn)
+	go ReadSerialOutput(serialConn, screenUpdateChan, connections, connectionsMutex)
 
 	log.Printf("Successfully opened and initialized port %s", port)
 	return serialConn, nil
 }
 
-func performHandshake(conn *SerialConnection) error {
+func PerformHandshake(conn *SerialConnection) error {
 	for retries := 0; retries < 3; retries++ {
 		_, err := conn.Port.Write([]byte("H\n"))
 		if err != nil {
@@ -96,15 +105,15 @@ func performHandshake(conn *SerialConnection) error {
 	return fmt.Errorf("handshake failed after 3 attempts for %s", conn.PortName)
 }
 
-func periodicHandshake(conn *SerialConnection) {
+func PeriodicHandshake(conn *SerialConnection, connections []*SerialConnection, connectionsMutex *sync.Mutex) {
 	ticker := time.NewTicker(HANDSHAKE_INTERVAL)
 	defer ticker.Stop()
 
 	for {
 		<-ticker.C
-		if err := performHandshake(conn); err != nil {
+		if err := PerformHandshake(conn); err != nil {
 			log.Printf("Handshake failed for device %s: %v", conn.DeviceID, err)
-			go attemptReconnection(conn)
+			go AttemptReconnection(conn, connections, connectionsMutex)
 			return // Exit this goroutine, as reconnection will start a new one if successful
 		}
 	}
@@ -135,12 +144,12 @@ func waitForAnyResponse(conn *SerialConnection, expectedResponses []string, time
 	return "", fmt.Errorf("timeout waiting for response from %s. Received data: %s", conn.DeviceID, conn.Output)
 }
 
-func readSerialOutput(conn *SerialConnection) {
+func ReadSerialOutput(conn *SerialConnection, screenUpdateChan chan<- ScreenUpdate, connections []*SerialConnection, connectionsMutex *sync.Mutex) {
 	buffer := make([]byte, 128)
 	for {
 		if conn == nil || conn.Port == nil {
 			log.Printf("Connection or port is nil for device %s", conn.DeviceID)
-			go attemptReconnection(conn)
+			go AttemptReconnection(conn, connections, connectionsMutex)
 			return // Exit this goroutine, as reconnection will start a new one if successful
 		}
 
@@ -149,7 +158,7 @@ func readSerialOutput(conn *SerialConnection) {
 			if err != io.EOF {
 				log.Printf("Error reading from %s: %v", conn.DeviceID, err)
 			}
-			go attemptReconnection(conn)
+			go AttemptReconnection(conn, connections, connectionsMutex)
 			return // Exit this goroutine, as reconnection will start a new one if successful
 		}
 		if n > 0 {
@@ -171,10 +180,10 @@ func readSerialOutput(conn *SerialConnection) {
 	}
 }
 
-func attemptReconnection(conn *SerialConnection) {
+func AttemptReconnection(conn *SerialConnection, connections []*SerialConnection, connectionsMutex *sync.Mutex) {
 	for {
 		log.Printf("Attempting to reconnect to %s", conn.PortName)
-		newConn, err := openSerialPort(conn.PortName)
+		newConn, err := OpenSerialPort(conn.PortName, connections, connectionsMutex)
 		if err == nil {
 			newConn.DeviceID = conn.DeviceID
 			connectionsMutex.Lock()

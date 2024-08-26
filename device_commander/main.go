@@ -10,13 +10,12 @@ import (
 	"sync"
 	"time"
 
+	"device_commander/comms"
+
 	"github.com/gdamore/tcell/v2"
 )
 
-type ScreenUpdate struct {
-	DeviceID string
-	Output   string
-}
+type ScreenUpdate = comms.ScreenUpdate
 
 var (
 	screenUpdateChan    = make(chan ScreenUpdate, 100) // Buffer for 100 updates
@@ -24,7 +23,7 @@ var (
 )
 
 var (
-	connections      []*SerialConnection
+	connections      []*comms.SerialConnection
 	connectionsMutex sync.Mutex
 	currentPortIndex int
 	screen           tcell.Screen
@@ -53,29 +52,29 @@ func main() {
         {"device_serial_no": "066EFF383159503043112729", "device_id": "5", "serial_port": "/dev/ttyACM5"},
         {"device_serial_no": "066CFF383159503043112926", "device_id": "6", "serial_port": "/dev/ttyACM6"}
     ]`
-	var devices []DeviceInfo
+	var devices []comms.DeviceInfo
 	err = json.Unmarshal([]byte(devicesJSON), &devices)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	connections = make([]*SerialConnection, 0, 7)
+	connections = make([]*comms.SerialConnection, 0, 7)
 
 	var wg sync.WaitGroup
-	connectionChan := make(chan *SerialConnection, len(devices))
+	connectionChan := make(chan *comms.SerialConnection, len(devices))
 
 	for _, device := range devices {
 		wg.Add(1)
-		go func(dev DeviceInfo) {
+		go func(dev comms.DeviceInfo) {
 			defer wg.Done()
-			conn, err := openSerialPort(dev.SerialPort)
+			conn, err := comms.OpenSerialPort(dev.SerialPort, connections, &connectionsMutex)
 			if err != nil {
 				log.Printf("Failed to open %s: %v", dev.SerialPort, err)
-				partialConn := &SerialConnection{
+				partialConn := &comms.SerialConnection{
 					DeviceID: dev.DeviceID,
 					PortName: dev.SerialPort,
 				}
-				go attemptReconnection(partialConn)
+				go comms.AttemptReconnection(partialConn, connections, &connectionsMutex)
 				return
 			}
 			conn.DeviceID = dev.DeviceID
@@ -91,8 +90,8 @@ func main() {
 
 	for conn := range connectionChan {
 		connections = append(connections, conn)
-		go periodicHandshake(conn)
-		go readSerialOutput(conn)
+		go comms.PeriodicHandshake(conn, connections, &connectionsMutex)
+		go comms.ReadSerialOutput(conn, screenUpdateChan, connections, &connectionsMutex)
 	}
 
 	if len(connections) == 0 {
@@ -131,10 +130,10 @@ func main() {
 					return
 				case tcell.KeyEnter:
 					if currentPortIndex == len(connections) {
-						sendCommandToAll(sendToAllBuffer, &connectionsMutex, connections)
+						comms.SendCommandToAll(sendToAllBuffer, &connectionsMutex, connections)
 						sendToAllBuffer = ""
 					} else {
-						sendCommand(inputBuffer, &connectionsMutex, connections, currentPortIndex)
+						comms.SendCommand(inputBuffer, &connectionsMutex, connections, currentPortIndex)
 						inputBuffer = ""
 					}
 				case tcell.KeyBackspace, tcell.KeyBackspace2:
@@ -187,7 +186,7 @@ func drawScreen() {
 	availableHeight := height - 4
 
 	// Sort connections by DeviceID
-	sortedConnections := make([]*SerialConnection, len(connections))
+	sortedConnections := make([]*comms.SerialConnection, len(connections))
 	copy(sortedConnections, connections)
 	sort.Slice(sortedConnections, func(i, j int) bool {
 		return sortedConnections[i].DeviceID < sortedConnections[j].DeviceID
@@ -225,7 +224,7 @@ func drawScreen() {
 	}
 
 	// Draw input line
-	inputLine := fmt.Sprintf("> %s", inputBuffer)
+	inputLine := fmt.Sprintf("%d-> %s", currentPortIndex, inputBuffer)
 	drawText(0, height-3, width, inputLine)
 
 	// Draw "Send to All" input line

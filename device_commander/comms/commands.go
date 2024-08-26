@@ -1,11 +1,11 @@
-package main
+package comms
 
 import (
 	"log"
 	"sync"
 )
 
-func sendCommandToAll(command string, connectionsMutex *sync.Mutex, connections []*SerialConnection) {
+func SendCommandToAll(command string, connectionsMutex *sync.Mutex, connections []*SerialConnection) {
 	connectionsMutex.Lock()
 	defer connectionsMutex.Unlock()
 
@@ -18,7 +18,7 @@ func sendCommandToAll(command string, connectionsMutex *sync.Mutex, connections 
 	}
 }
 
-func sendCommand(command string, connectionsMutex *sync.Mutex, connections []*SerialConnection, currentPortIndex int) {
+func SendCommand(command string, connectionsMutex *sync.Mutex, connections []*SerialConnection, currentPortIndex int) {
 	connectionsMutex.Lock()
 	conn := connections[currentPortIndex]
 	connectionsMutex.Unlock()
