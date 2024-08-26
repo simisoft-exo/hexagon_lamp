@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -171,6 +172,8 @@ func main() {
 					} else {
 						currentPortIndex = (currentPortIndex + 1) % (len(connections) + 1)
 					}
+				case tcell.KeyBacktab:
+					currentPortIndex = (currentPortIndex - 1 + len(connections) + 1) % (len(connections) + 1)
 				case tcell.KeyRune:
 					if ev.Rune() == 'q' && ev.Modifiers() == tcell.ModAlt {
 						return // Exit when Alt+Q is pressed
@@ -381,76 +384,6 @@ func reconnect(conn *SerialConnection) error {
 	return performHandshake(conn)
 }
 
-func sendInitialCommands(conn *SerialConnection) {
-	commands := []string{"init"}
-	for _, cmd := range commands {
-		sendCommandWithRetry(conn, cmd, 3) // Try each command up to 3 times
-
-		// Wait for acknowledgements
-		initializingAck := "ACK_INIT"
-		waitingForCommandAck := "ACK_RUNNING"
-
-		if !waitForResponse(conn, initializingAck) {
-			log.Printf("Did not receive INITIALIZING acknowledgement from device %s", conn.DeviceID)
-			continue // Try the next command instead of returning
-		}
-		if !waitForResponse(conn, waitingForCommandAck) {
-			log.Printf("Did not receive RUNNING acknowledgement from device %s", conn.DeviceID)
-			continue // Try the next command instead of returning
-		}
-	}
-}
-
-func sendCommandWithRetry(conn *SerialConnection, command string, retries int) {
-	for i := 0; i < retries; i++ {
-		log.Printf("Sending command to %s (attempt %d): %s", conn.DeviceID, i+1, command)
-		_, err := conn.Port.Write([]byte(command + "\n"))
-		if err != nil {
-			log.Printf("Error sending command to %s: %v", conn.DeviceID, err)
-			time.Sleep(time.Second) // Wait before retry
-			continue
-		}
-		return // Command sent successfully
-	}
-	log.Printf("Command %s failed after %d attempts for device %s", command, retries, conn.DeviceID)
-}
-
-func waitForResponse(conn *SerialConnection, expectedAck string) bool {
-	startTime := time.Now()
-	buffer := make([]byte, 128)
-	for time.Since(startTime) < 10*time.Second {
-		n, err := conn.Port.Read(buffer)
-		if err != nil {
-			if err != io.EOF {
-				log.Printf("Error reading from %s: %v", conn.DeviceID, err)
-			}
-			return false
-		}
-		if n > 0 {
-			receivedData := string(buffer[:n])
-			conn.Output += receivedData
-			if strings.Contains(conn.Output, expectedAck) {
-				return true
-			} else if strings.Contains(conn.Output, "FOC_STATUS:") {
-				status := strings.TrimSpace(strings.Split(conn.Output, "FOC_STATUS:")[1])
-				log.Printf("FOC Status for device %s: %s", conn.DeviceID, status)
-				if status != "MOT_INIT" {
-					log.Printf("FOC initialization did not result in MOTOR_READY status for device %s", conn.DeviceID)
-					return false
-				}
-			} else if strings.Contains(conn.Output, "INIT_FAILED") {
-				log.Printf("Initialization failed for device %s", conn.DeviceID)
-				return false
-			} else {
-				log.Printf("Received unexpected data from %s: %s", conn.DeviceID, receivedData)
-			}
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	log.Printf("Timeout waiting for acknowledgment from %s. Received data: %s", conn.DeviceID, conn.Output)
-	return false
-}
-
 func sendCommandToAll(command string) {
 	connectionsMutex.Lock()
 	defer connectionsMutex.Unlock()
@@ -491,11 +424,18 @@ func drawScreen() {
 	// Reserve 2 lines for input, 1 for "Send to All", and 1 for debug info
 	availableHeight := height - 4
 
+	// Sort connections by DeviceID
+	sortedConnections := make([]*SerialConnection, len(connections))
+	copy(sortedConnections, connections)
+	sort.Slice(sortedConnections, func(i, j int) bool {
+		return sortedConnections[i].DeviceID < sortedConnections[j].DeviceID
+	})
+
 	// Ensure at least 2 lines per device (1 for header, 1 for output)
-	deviceHeight := max(2, availableHeight/len(connections))
+	deviceHeight := max(2, availableHeight/len(sortedConnections))
 
 	// Draw device info and outputs
-	for i, conn := range connections {
+	for i, conn := range sortedConnections {
 		y := i * deviceHeight
 		if y >= availableHeight {
 			break // Stop if we've run out of space
@@ -528,14 +468,14 @@ func drawScreen() {
 
 	// Draw "Send to All" input line
 	sendToAllLine := fmt.Sprintf("Send to All> %s", sendToAllBuffer)
-	if currentPortIndex == len(connections) {
+	if currentPortIndex == len(sortedConnections) {
 		highlightText(0, height-2, width, sendToAllLine, tcell.ColorGreen, tcell.ColorBlack)
 	} else {
 		drawText(0, height-2, width, sendToAllLine)
 	}
 
 	// Draw debug info
-	debugInfo := fmt.Sprintf("Connected Devices: %d", len(connections))
+	debugInfo := fmt.Sprintf("Connected Devices: %d", len(sortedConnections))
 	drawText(0, height-1, width, debugInfo)
 
 	screen.Show()
