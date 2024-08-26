@@ -22,7 +22,7 @@
 (defn upload-to-device [device]
   (let [serial (get device "device_serial_no")
         device-id (get device "device_id")
-        cmd ["/usr/bin/st-flash" "--serial" serial "write" "/tmp/arduino/sketches/9966A1D8593F74EE345AA9DA5FF68892/simplefoc_tuning.ino.bin" "0x08000000"]
+        cmd ["/usr/bin/st-flash" "--serial" serial "write" "../simplefoc_tuning_upload_to_device/simplefoc_tuning.ino.bin" "0x08000000"]
         process (future
                   (let [result (apply run-command cmd)]
                     (if (zero? (:exit result))
