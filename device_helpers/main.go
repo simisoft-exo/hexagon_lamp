@@ -131,10 +131,10 @@ func main() {
 					return
 				case tcell.KeyEnter:
 					if currentPortIndex == len(connections) {
-						sendCommandToAll(sendToAllBuffer)
+						sendCommandToAll(sendToAllBuffer, &connectionsMutex, connections)
 						sendToAllBuffer = ""
 					} else {
-						sendCommand(inputBuffer)
+						sendCommand(inputBuffer, &connectionsMutex, connections, currentPortIndex)
 						inputBuffer = ""
 					}
 				case tcell.KeyBackspace, tcell.KeyBackspace2:
@@ -168,31 +168,6 @@ func main() {
 				drawScreen()
 			}
 		}
-	}
-}
-
-func sendCommandToAll(command string) {
-	connectionsMutex.Lock()
-	defer connectionsMutex.Unlock()
-
-	log.Printf("Sending command to all devices: %s", command)
-	for _, conn := range connections {
-		_, err := conn.Port.Write([]byte(command + "\n"))
-		if err != nil {
-			log.Printf("Error sending command to %s: %v", conn.DeviceID, err)
-		}
-	}
-}
-
-func sendCommand(command string) {
-	connectionsMutex.Lock()
-	conn := connections[currentPortIndex]
-	connectionsMutex.Unlock()
-
-	log.Printf("Sending command to %s: %s", conn.DeviceID, command)
-	_, err := conn.Port.Write([]byte(command + "\n"))
-	if err != nil {
-		log.Printf("Error sending command to %s: %v", conn.DeviceID, err)
 	}
 }
 
