@@ -30,6 +30,7 @@ var (
 	inputBuffer      string
 	logFile          *os.File
 	sendToAllBuffer  string
+	btBuffer         string
 )
 
 func main() {
@@ -45,6 +46,7 @@ func main() {
 	log.SetPrefix("main: ")
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 
+	comms.SetScreenUpdateChan(screenUpdateChan)
 	go comms.RunBluetooth()
 
 	// Device info for all 7 devices
@@ -137,6 +139,10 @@ func main() {
 					if currentPortIndex == len(connections) {
 						comms.SendCommandToAll(sendToAllBuffer, &connectionsMutex, connections)
 						sendToAllBuffer = ""
+					} else if currentPortIndex == len(connections)+1 {
+						// Send BT buffer to all devices
+						comms.SendCommandToAll(btBuffer, &connectionsMutex, connections)
+						btBuffer = ""
 					} else {
 						comms.SendCommand(inputBuffer, &connectionsMutex, connections, currentPortIndex)
 						inputBuffer = ""
@@ -146,6 +152,10 @@ func main() {
 						if len(sendToAllBuffer) > 0 {
 							sendToAllBuffer = sendToAllBuffer[:len(sendToAllBuffer)-1]
 						}
+					} else if currentPortIndex == len(connections)+1 {
+						if len(btBuffer) > 0 {
+							btBuffer = btBuffer[:len(btBuffer)-1]
+						}
 					} else {
 						if len(inputBuffer) > 0 {
 							inputBuffer = inputBuffer[:len(inputBuffer)-1]
@@ -153,18 +163,20 @@ func main() {
 					}
 				case tcell.KeyTab:
 					if ev.Modifiers() == tcell.ModShift {
-						currentPortIndex = (currentPortIndex - 1 + len(connections) + 1) % (len(connections) + 1)
+						currentPortIndex = (currentPortIndex - 1 + len(connections) + 2) % (len(connections) + 2)
 					} else {
-						currentPortIndex = (currentPortIndex + 1) % (len(connections) + 1)
+						currentPortIndex = (currentPortIndex + 1) % (len(connections) + 2)
 					}
 				case tcell.KeyBacktab:
-					currentPortIndex = (currentPortIndex - 1 + len(connections) + 1) % (len(connections) + 1)
+					currentPortIndex = (currentPortIndex - 1 + len(connections) + 2) % (len(connections) + 2)
 				case tcell.KeyRune:
 					if ev.Rune() == 'q' && ev.Modifiers() == tcell.ModAlt {
 						return // Exit when Alt+Q is pressed
 					}
 					if currentPortIndex == len(connections) {
 						sendToAllBuffer += string(ev.Rune())
+					} else if currentPortIndex == len(connections)+1 {
+						btBuffer += string(ev.Rune())
 					} else {
 						inputBuffer += string(ev.Rune())
 					}
@@ -187,8 +199,8 @@ func drawScreen() {
 	screen.Clear()
 	width, height := screen.Size()
 
-	// Reserve 2 lines for input, 1 for "Send to All", and 1 for debug info
-	availableHeight := height - 4
+	// Reserve 3 lines for input, 1 for "Send to All", 1 for Bluetooth, and 1 for debug info
+	availableHeight := height - 5
 
 	// Sort connections by DeviceID
 	sortedConnections := make([]*comms.SerialConnection, len(connections))
@@ -230,14 +242,22 @@ func drawScreen() {
 
 	// Draw input line
 	inputLine := fmt.Sprintf("%d-> %s", currentPortIndex, inputBuffer)
-	drawText(0, height-3, width, inputLine)
+	drawText(0, height-4, width, inputLine)
 
 	// Draw "Send to All" input line
 	sendToAllLine := fmt.Sprintf("Send to All> %s", sendToAllBuffer)
 	if currentPortIndex == len(sortedConnections) {
-		highlightText(0, height-2, width, sendToAllLine, tcell.ColorGreen, tcell.ColorBlack)
+		highlightText(0, height-3, width, sendToAllLine, tcell.ColorGreen, tcell.ColorBlack)
 	} else {
-		drawText(0, height-2, width, sendToAllLine)
+		drawText(0, height-3, width, sendToAllLine)
+	}
+
+	// Draw Bluetooth data line
+	btLine := fmt.Sprintf("BT> %s", btBuffer)
+	if currentPortIndex == len(sortedConnections)+1 {
+		highlightText(0, height-2, width, btLine, tcell.ColorGreen, tcell.ColorBlack)
+	} else {
+		drawText(0, height-2, width, btLine)
 	}
 
 	// Draw debug info
@@ -287,15 +307,23 @@ func screenUpdateLoop() {
 	for {
 		select {
 		case update := <-screenUpdateChan:
-			// Update the connection's output
-			connectionsMutex.Lock()
-			for _, conn := range connections {
-				if conn.DeviceID == update.DeviceID {
-					conn.Output = limitOutputBuffer(conn.Output + update.Output)
-					break
+			if update.DeviceID == "BT" {
+				// Special handling for Bluetooth data
+				log.Printf("Received Bluetooth data: %s", update.Output)
+				// Clear btBuffer before adding new command
+				btBuffer = update.Output
+				log.Printf("Updated Bluetooth buffer: %s", btBuffer)
+			} else {
+				// Update the connection's output for serial connections
+				connectionsMutex.Lock()
+				for _, conn := range connections {
+					if conn.DeviceID == update.DeviceID {
+						conn.Output = limitOutputBuffer(conn.Output + update.Output)
+						break
+					}
 				}
+				connectionsMutex.Unlock()
 			}
-			connectionsMutex.Unlock()
 		case <-screenRefreshTicker.C:
 			drawScreen()
 		}

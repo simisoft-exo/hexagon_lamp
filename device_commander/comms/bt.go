@@ -4,12 +4,20 @@ import (
 	"context"
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/go-ble/ble"
 	"github.com/go-ble/ble/examples/lib/dev"
+	"github.com/go-ble/ble/linux/hci/evt"
 	"github.com/pkg/errors"
 )
+
+var screenUpdateChan chan ScreenUpdate
+
+func SetScreenUpdateChan(ch chan ScreenUpdate) {
+	screenUpdateChan = ch
+}
 
 func RunBluetooth() {
 	// Open debug.log file for logging
@@ -47,6 +55,20 @@ func RunBluetooth() {
 				log.Printf("bt: Received raw data: %v", data)
 				log.Printf("bt: Received string data: %s", string(data))
 				log.Printf("bt: Received data: %s", string(data))
+
+				// Send the received string data to the main screen drawing
+				if screenUpdateChan != nil {
+					select {
+					case screenUpdateChan <- ScreenUpdate{
+						DeviceID: "BT",
+						Output:   string(data),
+					}:
+					default:
+						log.Println("bt: Failed to send update, channel full")
+					}
+				} else {
+					log.Println("bt: screenUpdateChan is nil")
+				}
 			}
 		}),
 	)
@@ -61,20 +83,35 @@ func RunBluetooth() {
 	}
 
 	// Start advertising
-
 	ctx := ble.WithSigHandler(context.WithTimeout(context.Background(), 300*time.Second))
 	chkErr(ble.AdvertiseNameAndServices(ctx, "Hexagon"))
 
-	for {
-		select {
-		case <-ctx.Done():
-			log.Println("bt: Context done, restarting advertising")
-			// Restart advertising
-			ctx = ble.WithSigHandler(context.WithTimeout(context.Background(), 300*time.Second))
-			err := ble.AdvertiseNameAndServices(ctx, "Hexagon")
-			if err != nil {
-				log.Printf("bt: Failed to restart advertising: %v", err)
+	// Handle connections
+
+	ble.OptConnectHandler(func(evt evt.LEConnectionComplete) {
+		log.Printf("bt: Got connection from %s", strconv.Itoa(int(evt.ConnectionHandle())))
+		if screenUpdateChan != nil {
+			select {
+			case screenUpdateChan <- ScreenUpdate{
+				DeviceID: "BT",
+				Output:   "Connected to " + strconv.Itoa(int(evt.ConnectionHandle())),
+			}:
+			default:
+				log.Println("bt: Failed to send connection update, channel full")
 			}
+		} else {
+			log.Println("bt: screenUpdateChan is nil for ble connection")
+			log.Println("bt: Got connection from " + strconv.Itoa(int(evt.ConnectionHandle())))
+		}
+	})
+
+	for range ctx.Done() {
+		log.Println("bt: Context done, restarting advertising")
+		// Restart advertising
+		ctx = ble.WithSigHandler(context.WithTimeout(context.Background(), 300*time.Second))
+		err := ble.AdvertiseNameAndServices(ctx, "Hexagon")
+		if err != nil {
+			log.Printf("bt: Failed to restart advertising: %v", err)
 		}
 	}
 }
