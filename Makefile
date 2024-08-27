@@ -29,19 +29,25 @@ install-docker:
 	@which docker > /dev/null || (sudo apt-get update && sudo apt-get install -y docker.io)
 	@sudo systemctl start docker
 	@sudo systemctl enable docker
+	@sudo usermod -aG docker $(USER)
+	@echo "You may need to log out and log back in for Docker permissions to take effect."
 
-# Pull and save the Docker image
-pull-docker-image:
-	@echo "Pulling Docker image..."
-	docker pull $(DOCKER_IMAGE)
-	docker save $(DOCKER_IMAGE) > $(DOCKER_IMAGE_TAR)
+# Set up Docker buildx
+setup-buildx:
+	@echo "Setting up Docker buildx..."
+	$(DOCKER_SUDO) docker buildx create --name arm64builder --use || true
+	$(DOCKER_SUDO) docker buildx inspect arm64builder --bootstrap
 
-# Compile the code inside the Docker container
+# Compile the code using Docker buildx
 compile:
-	@echo "Compiling $(GO_MAIN) in $(SUBFOLDER)..."
-	$(DOCKER_SUDO) docker run --rm -v $(PWD):/go/src/app -w /go/src/app/$(SUBFOLDER) $(DOCKER_IMAGE) \
-		go build -o ../$(EXECUTABLE_NAME) ./$(GO_MAIN)
-# Deploy the executable to Raspberry Pi
+	@echo "Cross-compiling $(GO_MAIN) in $(SUBFOLDER) for ARM64..."
+	$(DOCKER_SUDO) docker buildx build --platform linux/arm64 \
+		--build-arg SUBFOLDER=$(SUBFOLDER) \
+		--build-arg GO_MAIN=$(GO_MAIN) \
+		--build-arg EXECUTABLE_NAME=$(EXECUTABLE_NAME) \
+		--output type=local,dest=. \
+		-f Dockerfile.cross .
+
 deploy:
 	@echo "Deploying to Raspberry Pi..."
 	scp $(EXECUTABLE_NAME) $(RPI_USER)@$(RPI_ADDRESS):$(REMOTE_PATH)
