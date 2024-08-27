@@ -83,11 +83,14 @@ func RunBluetooth() {
 	}
 
 	// Start advertising
-	ctx := ble.WithSigHandler(context.WithTimeout(context.Background(), 300*time.Second))
-	chkErr(ble.AdvertiseNameAndServices(ctx, "Hexagon"))
+	advertise := func() {
+		ctx := ble.WithSigHandler(context.WithTimeout(context.Background(), 300*time.Second))
+		chkErr(ble.AdvertiseNameAndServices(ctx, "Hexagon"))
+	}
 
-	// Handle connections
+	advertise()
 
+	// Handle connections and disconnections
 	ble.OptConnectHandler(func(evt evt.LEConnectionComplete) {
 		log.Printf("bt: Got connection from %s", strconv.Itoa(int(evt.ConnectionHandle())))
 		if screenUpdateChan != nil {
@@ -101,19 +104,29 @@ func RunBluetooth() {
 			}
 		} else {
 			log.Println("bt: screenUpdateChan is nil for ble connection")
-			log.Println("bt: Got connection from " + strconv.Itoa(int(evt.ConnectionHandle())))
 		}
 	})
 
-	for range ctx.Done() {
-		log.Println("bt: Context done, restarting advertising")
-		// Restart advertising
-		ctx = ble.WithSigHandler(context.WithTimeout(context.Background(), 300*time.Second))
-		err := ble.AdvertiseNameAndServices(ctx, "Hexagon")
-		if err != nil {
-			log.Printf("bt: Failed to restart advertising: %v", err)
+	ble.OptDisconnectHandler(func(evt evt.DisconnectionComplete) {
+		log.Printf("bt: Disconnected from %s", strconv.Itoa(int(evt.ConnectionHandle())))
+		if screenUpdateChan != nil {
+			select {
+			case screenUpdateChan <- ScreenUpdate{
+				DeviceID: "BT",
+				Output:   "Disconnected from " + strconv.Itoa(int(evt.ConnectionHandle())),
+			}:
+			default:
+				log.Println("bt: Failed to send disconnection update, channel full")
+			}
+		} else {
+			log.Println("bt: screenUpdateChan is nil for ble disconnection")
 		}
-	}
+		// Start advertising again after disconnection
+		go advertise()
+	})
+
+	// Keep the function running
+	select {}
 }
 
 func chkErr(err error) {
