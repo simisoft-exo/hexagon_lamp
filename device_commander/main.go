@@ -33,14 +33,19 @@ var (
 )
 
 func main() {
-	// Set up logging
+
 	var err error
 	logFile, err = os.OpenFile("debug.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
-		log.Fatalf("Error opening log file: %v", err)
+		fmt.Printf("Error opening log file: %v\n", err)
+		os.Exit(1)
 	}
 	defer logFile.Close()
 	log.SetOutput(logFile)
+	log.SetPrefix("main: ")
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+
+	go comms.RunBluetooth()
 
 	// Device info for all 7 devices
 	devicesJSON := `[
