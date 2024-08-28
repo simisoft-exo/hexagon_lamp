@@ -4,13 +4,13 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 class DeviceDetailPage extends StatefulWidget {
   final BluetoothDevice device;
 
-  DeviceDetailPage({required this.device});
+  const DeviceDetailPage({required this.device});
 
   @override
-  _DeviceDetailPageState createState() => _DeviceDetailPageState();
+  DeviceDetailPageState createState() => DeviceDetailPageState();
 }
 
-class _DeviceDetailPageState extends State<DeviceDetailPage> {
+class DeviceDetailPageState extends State<DeviceDetailPage> {
   List<BluetoothService> services = [];
 
   @override
@@ -28,7 +28,7 @@ class _DeviceDetailPageState extends State<DeviceDetailPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.device.name ?? 'Unknown Device'),
+        title: Text(widget.device.platformName ?? 'Unknown Device'),
       ),
       body: ListView.builder(
         itemCount: services.length,
@@ -43,20 +43,20 @@ class _DeviceDetailPageState extends State<DeviceDetailPage> {
                 children: [
                   if (c.properties.read)
                     ListTile(
-                      leading: Icon(Icons.visibility),
-                      title: Text('Read'),
+                      leading: const Icon(Icons.visibility),
+                      title: const Text('Read'),
                       onTap: () => readCharacteristic(c),
                     ),
                   if (c.properties.write)
                     ListTile(
-                      leading: Icon(Icons.edit),
-                      title: Text('Write'),
+                      leading: const Icon(Icons.edit),
+                      title: const Text('Write'),
                       onTap: () => writeCharacteristic(c),
                     ),
                   if (c.properties.notify)
                     ListTile(
-                      leading: Icon(Icons.notifications),
-                      title: Text('Notify'),
+                      leading: const Icon(Icons.notifications),
+                      title: const Text('Notify'),
                       onTap: () => subscribeToCharacteristic(c),
                     ),
                 ],
@@ -72,14 +72,18 @@ class _DeviceDetailPageState extends State<DeviceDetailPage> {
     try {
       List<int> value = await c.read();
       print('Read value: $value');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Read value: $value')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Read value: $value')),
+        );
+      }
     } catch (e) {
       print('Error reading characteristic: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error reading characteristic: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error reading characteristic: $e')),
+        );
+      }
     }
   }
 
@@ -91,22 +95,22 @@ class _DeviceDetailPageState extends State<DeviceDetailPage> {
         builder: (BuildContext context) {
           String inputText = '';
           return AlertDialog(
-            title: Text('Write to Characteristic'),
+            title: const Text('Write to Characteristic'),
             content: TextField(
               onChanged: (value) {
                 inputText = value;
               },
-              decoration: InputDecoration(hintText: "Enter data to write"),
+              decoration: const InputDecoration(hintText: "Enter data to write"),
             ),
             actions: <Widget>[
               TextButton(
-                child: Text('Cancel'),
+                child: const Text('Cancel'),
                 onPressed: () {
                   Navigator.of(context).pop();
                 },
               ),
               TextButton(
-                child: Text('Write'),
+                child: const Text('Write'),
                 onPressed: () {
                   Navigator.of(context).pop(inputText);
                 },
@@ -120,34 +124,42 @@ class _DeviceDetailPageState extends State<DeviceDetailPage> {
         List<int> bytes = userInput.codeUnits;
         await c.write(bytes);
         print('Write successful: $userInput');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Write successful: $userInput')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Write successful: $userInput')),
+          );
+        }
       } else {
         print('Write cancelled or empty input');
       }
     } catch (e) {
       print('Error writing characteristic: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error writing characteristic: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error writing characteristic: $e')),
+        );
+      }
     }
   }
 
   void subscribeToCharacteristic(BluetoothCharacteristic c) async {
     try {
       await c.setNotifyValue(true);
-      c.value.listen((value) {
+      c.lastValueStream.listen((value) {
         print('Notification received: $value');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Notification received: $value')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Notification received: $value')),
+          );
+        }
       });
     } catch (e) {
       print('Error subscribing to characteristic: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error subscribing to characteristic: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error subscribing to characteristic: $e')),
+        );
+      }
     }
   }
 }

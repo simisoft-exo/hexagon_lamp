@@ -4,11 +4,13 @@ import 'package:permission_handler/permission_handler.dart';
 import 'device_detail_page.dart'; 
 
 class BluetoothPage extends StatefulWidget {
+  const BluetoothPage({super.key});
+
   @override
-  _BluetoothPageState createState() => _BluetoothPageState();
+  BluetoothPageState createState() => BluetoothPageState();
 }
 
-class _BluetoothPageState extends State<BluetoothPage> {
+class BluetoothPageState extends State<BluetoothPage> {
   List<ScanResult> scanResults = [];
   bool isScanning = false;
   bool isBluetoothEnabled = false;
@@ -20,7 +22,7 @@ class _BluetoothPageState extends State<BluetoothPage> {
   }
 
   Future<void> checkBluetoothStatus() async {
-    bool isEnabled = await FlutterBluePlus.isOn;
+    bool isEnabled = await FlutterBluePlus.adapterState.first == BluetoothAdapterState.on;
     setState(() {
       isBluetoothEnabled = isEnabled;
     });
@@ -51,7 +53,7 @@ class _BluetoothPageState extends State<BluetoothPage> {
     });
 
     try {
-      await FlutterBluePlus.startScan(timeout: Duration(seconds: 4));
+      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 4));
       FlutterBluePlus.scanResults.listen((results) {
         setState(() {
           scanResults = results;
@@ -90,10 +92,12 @@ class _BluetoothPageState extends State<BluetoothPage> {
         await checkBluetoothStatus();
       } catch (e) {
         print('Error enabling Bluetooth: $e');
-        // Show a dialog or snackbar to inform the user that Bluetooth couldn't be enabled
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to enable Bluetooth. Please enable it manually.')),
-        );
+        // Check if the widget is still mounted before using BuildContext
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to enable Bluetooth. Please enable it manually.')),
+          );
+        }
       }
     }
   }
@@ -102,13 +106,13 @@ class _BluetoothPageState extends State<BluetoothPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Bluetooth Devices'),
+        title: const Text('Bluetooth Devices'),
       ),
       body: !isBluetoothEnabled
           ? Center(
               child: ElevatedButton(
                 onPressed: enableBluetooth,
-                child: Text('Enable Bluetooth'),
+                child: const Text('Enable Bluetooth'),
               ),
             )
           : ListView.builder(
@@ -116,7 +120,7 @@ class _BluetoothPageState extends State<BluetoothPage> {
               itemBuilder: (context, index) {
                 ScanResult result = scanResults.where((result) => result.advertisementData.connectable).toList()[index];
                 BluetoothDevice device = result.device;
-                String deviceName = device.name.isNotEmpty ? device.name : result.advertisementData.localName ?? 'Unknown Device';
+                String deviceName = device.platformName.isNotEmpty ? device.platformName : result.advertisementData.advName ?? 'Unknown Device';
                 bool isConnected = device.isConnected;
                 
                 // Calculate signal strength percentage
@@ -130,7 +134,7 @@ class _BluetoothPageState extends State<BluetoothPage> {
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('UUID: ${device.id.toString()}'),
+                      Text('UUID: ${device.remoteId.toString()}'),
                       Text('Signal Strength: ${signalPercentage.toStringAsFixed(1)}%'),
                       Text('Status: ${isConnected ? 'Connected' : 'Not Connected'}'),
                     ],
@@ -148,7 +152,7 @@ class _BluetoothPageState extends State<BluetoothPage> {
                         context: context,
                         barrierDismissible: false,
                         builder: (BuildContext context) {
-                          return AlertDialog(
+                          return const AlertDialog(
                             content: Row(
                               children: [
                                 CircularProgressIndicator(),
