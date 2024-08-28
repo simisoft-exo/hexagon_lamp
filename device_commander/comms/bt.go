@@ -2,9 +2,11 @@ package comms
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/go-ble/ble"
@@ -19,11 +21,62 @@ func SetScreenUpdateChan(ch chan ScreenUpdate) {
 	screenUpdateChan = ch
 }
 
+var (
+	connectedDevices map[string]ble.Client
+	deviceMutex      sync.Mutex
+)
+
+func init() {
+	connectedDevices = make(map[string]ble.Client)
+}
+
+func handleDisconnect(c ble.Client) {
+	deviceMutex.Lock()
+	defer deviceMutex.Unlock()
+
+	// Remove the disconnected device from our map
+	for addr, client := range connectedDevices {
+		if client == c {
+			delete(connectedDevices, addr)
+			log.Printf("bt: Device %s disconnected", addr)
+
+			// Attempt to reconnect
+			go func(address string) {
+				for {
+					log.Printf("bt: Attempting to reconnect to %s", address)
+					ctx := ble.WithSigHandler(context.WithTimeout(context.Background(), 30*time.Second))
+					c, err := ble.Connect(ctx, filter(address))
+					if err != nil {
+						log.Printf("bt: Failed to reconnect to %s: %v", address, err)
+						time.Sleep(5 * time.Second)
+						continue
+					}
+
+					deviceMutex.Lock()
+					connectedDevices[address] = c
+					deviceMutex.Unlock()
+
+					log.Printf("bt: Successfully reconnected to %s", address)
+					return
+				}
+			}(addr)
+
+			break
+		}
+	}
+}
+
+func filter(addr string) ble.AdvFilter {
+	return func(a ble.Advertisement) bool {
+		return a.Addr().String() == addr
+	}
+}
+
 func RunBluetooth() {
-	// Open debug.log file for logging
+	// Open bt-debug.log file for logging in the current directory
 	debugFile, err := os.OpenFile("bt-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
 	if err != nil {
-		log.Fatalf("bt: Can't open debug.log file: %s", err)
+		log.Fatalf("bt: Can't open bt-debug.log file: %s", err)
 	}
 	defer debugFile.Close()
 
@@ -84,29 +137,58 @@ func RunBluetooth() {
 
 	// Start advertising
 	advertise := func() {
-		ctx := ble.WithSigHandler(context.WithTimeout(context.Background(), 300*time.Second))
+		ctx := ble.WithSigHandler(context.Background(), nil)
 		chkErr(ble.AdvertiseNameAndServices(ctx, "Hexagon"))
 	}
 
 	advertise()
 
-	// Handle connections and disconnections
+	// Handle connections
 	ble.OptConnectHandler(func(evt evt.LEConnectionComplete) {
-		log.Printf("bt: Got connection from %s", strconv.Itoa(int(evt.ConnectionHandle())))
+		addr := fmt.Sprintf("%02X:%02X:%02X:%02X:%02X:%02X",
+			evt.PeerAddress()[5], evt.PeerAddress()[4], evt.PeerAddress()[3],
+			evt.PeerAddress()[2], evt.PeerAddress()[1], evt.PeerAddress()[0])
+		log.Printf("bt: OptConnectHandler called for address %s", addr)
+
+		ctx := context.Background()
+		c, err := ble.Connect(ctx, filter(addr))
+		if err != nil {
+			log.Printf("bt: Failed to connect to %s: %v", addr, err)
+			return
+		}
+
+		log.Printf("bt: Successfully connected to %s", addr)
+
+		deviceMutex.Lock()
+		connectedDevices[addr] = c
+		deviceMutex.Unlock()
+
+		log.Printf("bt: Added %s to connectedDevices", addr)
+
+		go func() {
+			<-c.Disconnected()
+			log.Printf("bt: Disconnection detected for %s", addr)
+			handleDisconnect(c)
+		}()
+
 		if screenUpdateChan != nil {
 			select {
 			case screenUpdateChan <- ScreenUpdate{
 				DeviceID: "BT",
-				Output:   "Connected to " + strconv.Itoa(int(evt.ConnectionHandle())),
+				Output:   "Connected to " + addr,
 			}:
+				log.Printf("bt: Sent connection update for %s", addr)
 			default:
-				log.Println("bt: Failed to send connection update, channel full")
+				log.Printf("bt: Failed to send connection update for %s, channel full", addr)
 			}
 		} else {
-			log.Println("bt: screenUpdateChan is nil for ble connection")
+			log.Printf("bt: screenUpdateChan is nil for ble connection to %s", addr)
 		}
+
+		log.Printf("bt: OptConnectHandler completed for %s", addr)
 	})
 
+	// Handle disconnections
 	ble.OptDisconnectHandler(func(evt evt.DisconnectionComplete) {
 		log.Printf("bt: Disconnected from %s", strconv.Itoa(int(evt.ConnectionHandle())))
 		if screenUpdateChan != nil {
@@ -133,7 +215,7 @@ func chkErr(err error) {
 	switch errors.Cause(err) {
 	case nil:
 	case context.DeadlineExceeded:
-		log.Printf("bt:done\n")
+		log.Printf("bt: timeout deadline exceeded\n")
 	case context.Canceled:
 		log.Printf("bt:canceled\n")
 	default:

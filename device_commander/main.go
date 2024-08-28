@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"device_commander/comms"
+	"device_commander/lights"
 
 	"github.com/gdamore/tcell/v2"
 )
@@ -47,6 +48,7 @@ func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 
 	comms.SetScreenUpdateChan(screenUpdateChan)
+	go lights.Run()
 	go comms.RunBluetooth()
 
 	// Device info for all 7 devices
