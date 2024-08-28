@@ -18,9 +18,10 @@ require (
 	github.com/mattn/go-runewidth v0.0.15 // indirect
 	github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b // indirect
 	github.com/mgutz/logxi v0.0.0-20161027140823-aebf8a7d67ab // indirect
-	github.com/pkg/errors v0.8.1 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/raff/goble v0.0.0-20190909174656-72afc67d6a99 // indirect
 	github.com/rivo/uniseg v0.4.3 // indirect
+	github.com/rpi-ws281x/rpi-ws281x-go v1.0.10 // indirect
 	github.com/sirupsen/logrus v1.5.0 // indirect
 	golang.org/x/sys v0.22.0 // indirect
 	golang.org/x/term v0.17.0 // indirect
