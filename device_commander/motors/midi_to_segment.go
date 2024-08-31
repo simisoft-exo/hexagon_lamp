@@ -1,19 +1,25 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"math"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"gitlab.com/gomidi/midi/v2/smf"
 )
 
-func readMIDIFile(filePath string) (*smf.SMF, error) {
+func readMIDIFile(filePath string) (*smf.SMF, smf.TimeFormat, error) {
 	smfFile, err := smf.ReadFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("error reading MIDI file: %v", err)
+		return nil, nil, fmt.Errorf("error reading MIDI file: %v", err)
 	}
-	return smfFile, nil
+
+	return smfFile, smfFile.TimeFormat, nil
 }
 
 type Segment struct {
@@ -21,11 +27,41 @@ type Segment struct {
 	Duration int64
 }
 
-var selectedTracks = []int{9, 12, 3, 13, 14, 7, 15}
+type MotorTrackToPattern struct {
+	Track int64
+	Motor int64
+}
 
-func printMIDIFileInfo(smfFile *smf.SMF, filePath string) {
+var motorTrackMapping = []MotorTrackToPattern{
+	{Track: 9, Motor: 0},
+	{Track: 12, Motor: 1},
+	{Track: 3, Motor: 2},
+	{Track: 13, Motor: 3},
+	{Track: 14, Motor: 4},
+	{Track: 7, Motor: 5},
+	{Track: 15, Motor: 6},
+}
+
+func printMIDIFileInfo(smfFile *smf.SMF, timeFormat smf.TimeFormat, filePath string) {
 	fmt.Printf("MIDI file: %s\n", filePath)
 	fmt.Printf("Number of tracks: %d\n", len(smfFile.Tracks))
+
+	// Assume initial tempo of 120 BPM
+	tempo := 120.0
+
+	var ticksPerQuarterNote float64
+	if metrical, ok := timeFormat.(smf.MetricTicks); ok {
+		ticksPerQuarterNote = float64(metrical.Resolution())
+		fmt.Printf("Ticks per quarter note: %v\n", ticksPerQuarterNote)
+	} else if timecode, ok := timeFormat.(smf.TimeCode); ok {
+		fmt.Printf("SMPTE format: %d FPS, %d subframes\n", timecode.FramesPerSecond, timecode.SubFrames)
+		// For SMPTE, we'd need to handle this differently
+		fmt.Println("SMPTE time format not supported in this example")
+		return
+	}
+
+	// Calculate milliseconds per tick
+	millisPerTick := 60000.0 / (tempo * ticksPerQuarterNote)
 
 	type trackInfo struct {
 		index        int
@@ -36,45 +72,60 @@ func printMIDIFileInfo(smfFile *smf.SMF, filePath string) {
 	}
 
 	tracks := make([]trackInfo, len(smfFile.Tracks))
-	for i, track := range smfFile.Tracks {
-		tracks[i] = trackInfo{index: i + 1, eventCount: len(track)}
-		fmt.Printf("Track %d events:\n", i+1)
-		for channel := 0; channel < 16; channel++ {
-			var hasEvents bool
-			var channelEvents []string
-			for _, event := range track {
-				var ch, vel uint8
-				if event.Message.GetNoteOn(&ch, nil, &vel) && ch == uint8(channel) {
-					hasEvents = true
-					channelEvents = append(channelEvents, fmt.Sprintf("    delta %d - velocity %d", event.Delta, vel))
-					tracks[i].totalDelta += int64(event.Delta)
-					if vel == 0 {
-						tracks[i].zeroDelta += int64(event.Delta)
-					} else {
-						tracks[i].nonZeroDelta += int64(event.Delta)
-					}
+	patterns := make(map[int64][]Segment)
+	for _, mapping := range motorTrackMapping {
+		track := smfFile.Tracks[mapping.Track-1]
+		segments := []Segment{}
+		for _, event := range track {
+			var ch, vel uint8
+			if event.Message.GetNoteOn(&ch, nil, &vel) {
+				duration := int64(float64(event.Delta) * millisPerTick)
+				velocity := float64(vel)
+				if vel == 0 {
+					velocity = 0
+				} else {
+					velocity = math.Max(0, math.Min(10, (float64(vel)/127.0)*10.0))
 				}
-			}
-			if hasEvents {
-				var minVelocity, maxVelocity uint8 = 127, 0
-				for _, event := range track {
-					var ch, vel uint8
-					if event.Message.GetNoteOn(&ch, nil, &vel) && ch == uint8(channel) {
-						if vel < minVelocity {
-							minVelocity = vel
-						}
-						if vel > maxVelocity {
-							maxVelocity = vel
-						}
-					}
-				}
-				fmt.Printf("  Channel %d (Min velocity: %d, Max velocity: %d):\n", channel, minVelocity, maxVelocity)
-				for _, eventStr := range channelEvents {
-					fmt.Println(eventStr)
-				}
+				segments = append(segments, Segment{
+					Duration: duration,
+					Velocity: velocity,
+				})
 			}
 		}
+		patterns[mapping.Motor] = segments
 	}
+
+	output := struct {
+		Patterns []struct {
+			MotorId  int64     `json:"motorId"`
+			Segments []Segment `json:"segments"`
+		} `json:"patterns"`
+	}{}
+
+	for motorId, segments := range patterns {
+		output.Patterns = append(output.Patterns, struct {
+			MotorId  int64     `json:"motorId"`
+			Segments []Segment `json:"segments"`
+		}{
+			MotorId:  motorId,
+			Segments: segments,
+		})
+	}
+
+	jsonData, err := json.MarshalIndent(output, "", "    ")
+	if err != nil {
+		fmt.Printf("Error marshaling JSON: %v\n", err)
+		return
+	}
+
+	outputFileName := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath)) + ".json"
+	err = ioutil.WriteFile(outputFileName, jsonData, 0644)
+	if err != nil {
+		fmt.Printf("Error writing JSON file: %v\n", err)
+		return
+	}
+
+	fmt.Printf("JSON file created: %s\n", outputFileName)
 
 	sort.Slice(tracks, func(i, j int) bool {
 		return tracks[i].eventCount > tracks[j].eventCount
@@ -110,12 +161,14 @@ func main() {
 	midiFilePath := os.Args[1]
 
 	// Read the MIDI file
-	smfFile, err := readMIDIFile(midiFilePath)
+	smfFile, timeFormat, err := readMIDIFile(midiFilePath)
 	if err != nil {
 		fmt.Printf("Error reading MIDI file: %v\n", err)
 		os.Exit(1)
 	}
 
+	fmt.Printf("Time Format: %v\n", timeFormat)
+
 	// Print information about the MIDI file and its tracks
-	printMIDIFileInfo(smfFile, midiFilePath)
+	printMIDIFileInfo(smfFile, timeFormat, midiFilePath)
 }
