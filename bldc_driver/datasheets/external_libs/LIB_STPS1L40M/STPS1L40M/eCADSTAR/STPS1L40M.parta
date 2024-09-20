@@ -1,0 +1,70 @@
+(Japanese_coding: sjis)
+(function "ECS_313269"
+    (uver 1)
+    (cuser "SamacSys")
+    (uuser "SamacSys")
+    (ctime 2018-05-20-23:17:22)
+    (utime 2024-06-23-09:03:05)
+    (interface
+        (port "1" (symbPinId 1) (portType INOUT))
+        (port "2" (symbPinId 2) (portType INOUT))
+        (port "3" (symbPinId 3) (portType INOUT))
+    )
+    (property "symbolName" "STPS1L40M")
+)
+
+
+(pinAssign "ECS_313269"
+    (uver 1)
+    (cuser "SamacSys")
+    (uuser "SamacSys")
+    (ctime 2018-05-20-23:17:22)
+    (utime 2024-06-23-09:03:05)
+    (interface
+        (port "1" (symbPinId 1) (portName "K_1") (portType INOUT))
+        (port "2" (symbPinId 2) (portName "K_2") (portType INOUT))
+        (port "3" (symbPinId 3) (portName "A") (portType INOUT))
+    )
+    (internal
+        (funcInst (functionRef "ECS_313269")
+                (port "1" (match "1"))
+                (port "2" (match "2"))
+                (port "3" (match "3"))
+        )
+    )
+    (property "usePowerBox" "No")
+    (property "symbolName" "STPS1L40M")
+)
+
+
+(part "STPS1L40M"
+    (uver 1)
+    (cuser "SamacSys")
+    (uuser "SamacSys")
+    (ctime 2018-05-20-23:17:22)
+    (utime 2024-06-23-09:03:05)
+    (packageRef "STPS1L40M")
+    (pinAssignRef "ECS_313269")
+    (interface
+        (port "1" (symbPinId 1) (portName "K_1") (portType INOUT))
+        (port "2" (symbPinId 2) (portName "K_2") (portType INOUT))
+        (port "3" (symbPinId 3) (portName "A") (portType INOUT))
+    )
+    (partClass UNDEF)
+    (useInSchema Y)
+    (useInLayout Y)
+    (inPartsList Y)
+    (partType NORMAL)
+    (placeRestriction FREE)
+    (property "enetNonSeries" "NO")
+    (property "refDesPrefix" "D")
+    (property "description" "STMICROELECTRONICS - STPS1L40M - SCHOTTKY RECTIFIER, 1A, 40V, DO-216AA")
+    (property "Mouser_Part_Number" "511-STPS1L40M")
+    (property "Mouser_Price/Stock" "https://www.mouser.co.uk/ProductDetail/STMicroelectronics/STPS1L40M?qs=1tTY8DFIKADyj1WerxBVhA%3D%3D")
+    (property "Manufacturer_Name" "STMicroelectronics")
+    (property "Manufacturer_Part_Number" "STPS1L40M")
+    (property "Datasheet_Link" "http://www.st.com/content/ccc/resource/technical/document/datasheet/62/69/a4/97/73/11/43/c2/CD00003015.pdf/files/CD00003015.pdf/jcr:content/translations/en.CD00003015.pdf")
+    (property "compAreaTopHeight" 1)
+)
+
+

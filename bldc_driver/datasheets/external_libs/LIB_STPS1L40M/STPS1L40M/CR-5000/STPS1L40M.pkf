@@ -1,0 +1,10 @@
+(unit MM)
+
+(package "STPS1L40M"
+    (type UNDEF)
+    (uver 2)
+    (mountForm default
+        (footprintRef "STPS1L40M")
+        (spec "default")
+    )
+)

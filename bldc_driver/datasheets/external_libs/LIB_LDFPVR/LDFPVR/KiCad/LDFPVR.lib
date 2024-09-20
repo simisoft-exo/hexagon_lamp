@@ -1,0 +1,28 @@
+EESchema-LIBRARY Version 2.3
+#encoding utf-8
+#SamacSys ECAD Model LDFPVR
+#/424376/1491498/2.50/7/4/Integrated Circuit
+DEF LDFPVR IC 0 30 Y Y 1 F N
+F0 "IC" 1250 300 50 H V L CNN
+F1 "LDFPVR" 1250 200 50 H V L CNN
+F2 "SON65P200X200X100-7N-D" 1250 100 50 H I L CNN
+F3 "http://www.st.com/content/ccc/resource/technical/document/datasheet/3e/64/32/d3/73/04/4a/70/DM00099995.pdf/files/DM00099995.pdf/jcr:content/translations/en.DM00099995.pdf" 1250 0 50 H I L CNN
+F4 "STMicroelectronics LDFPVR, LDO Voltage Regulator, Adjustable 1A, 0.8  12 V +/-1.5%, 6-Pin DFN" 1250 -100 50 H I L CNN "Description"
+F5 "1" 1250 -200 50 H I L CNN "Height"
+F6 "511-LDFPVR" 1250 -300 50 H I L CNN "Mouser Part Number"
+F7 "https://www.mouser.co.uk/ProductDetail/STMicroelectronics/LDFPVR?qs=xLDY6iXSiQbeQdnd6kJYEg%3D%3D" 1250 -400 50 H I L CNN "Mouser Price/Stock"
+F8 "STMicroelectronics" 1250 -500 50 H I L CNN "Manufacturer_Name"
+F9 "LDFPVR" 1250 -600 50 H I L CNN "Manufacturer_Part_Number"
+DRAW
+X VOUT 1 0 0 200 R 50 50 0 0 P
+X ADJ/NC 2 0 -100 200 R 50 50 0 0 P
+X PG 3 0 -200 200 R 50 50 0 0 P
+X GND_2 7 700 -900 200 U 50 50 0 0 P
+X VIN 6 1400 0 200 L 50 50 0 0 P
+X EN 5 1400 -100 200 L 50 50 0 0 P
+X GND_1 4 1400 -200 200 L 50 50 0 0 P
+P 5 0 1 6 200 100 1200 100 1200 -700 200 -700 200 100 N
+ENDDRAW
+ENDDEF
+#
+#End Library

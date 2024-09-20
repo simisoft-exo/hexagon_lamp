@@ -1,0 +1,11 @@
+FILE_TYPE = MULTI_PHYS_TABLE;
+
+PART 'STPS1L40M'
+CLASS = DISCRETE
+{========================================================================================}
+:"MANUFACTURER_NAME", "MANUFACTURER_PART_NUMBER"= "PART_NUMBER", "JEDEC_TYPE", "PACK_TYPE", "MOUSER_PART_NUMBER", "MOUSER_PRICE/STOCK", "DESCRIPTION", "DATASHEET", "HEIGHT";
+{========================================================================================}
+ "STMicroelectronics", "STPS1L40M" (!) = "", "STPS1L40M", "Other", "511-STPS1L40M", "https://www.mouser.co.uk/ProductDetail/STMicroelectronics/STPS1L40M?qs=1tTY8DFIKADyj1WerxBVhA%3D%3D", "STMICROELECTRONICS - STPS1L40M - SCHOTTKY RECTIFIER, 1A, 40V, DO-216AA", "http://www.st.com/content/ccc/resource/technical/document/datasheet/62/69/a4/97/73/11/43/c2/CD00003015.pdf/files/CD00003015.pdf/jcr:content/translations/en.CD00003015.pdf", "1 mm"
+END_PART
+
+END.

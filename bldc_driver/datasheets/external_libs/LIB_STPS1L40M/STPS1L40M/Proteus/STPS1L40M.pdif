@@ -1,0 +1,105 @@
+;Proteus Design Interchange Format
+(PDIF
+ (vendor "SamacSys Limited")
+ (version 1 0)
+ (library
+  (part "STPS1L40M"
+   (description "STMICROELECTRONICS - STPS1L40M - SCHOTTKY RECTIFIER, 1A, 40V, DO-216AA")
+   (family "DIO")
+   (package "STPS1L40M")
+   (attribute "Datasheet Link" "http://www.st.com/content/ccc/resource/technical/document/datasheet/62/69/a4/97/73/11/43/c2/CD00003015.pdf/files/CD00003015.pdf/jcr:content/translations/en.CD00003015.pdf")
+   (attribute "Geometry.Height" "1mm")
+   (attribute "Mouser Part Number" "511-STPS1L40M")
+   (attribute "Mouser Price/Stock" "https://www.mouser.co.uk/ProductDetail/STMicroelectronics/STPS1L40M?qs=1tTY8DFIKADyj1WerxBVhA%3D%3D")
+   (attribute "Manufacturer_Name" "STMicroelectronics")
+   (attribute "Manufacturer_Part_Number" "STPS1L40M")
+   (gate
+    (symbol "STPS1L40M")
+    (pin "K_1" 1 PS)
+    (pin "K_2" 2 PS)
+    (pin "A" 3 PS)
+   )
+  )
+  (symbol "STPS1L40M"
+   (units THOU)
+   (origin (pt 0 0))
+   (graphic
+    (stroke 10)
+    (path (pt 200 100) (pt 700 100) (pt 700 -300) (pt 200 -300) (pt 200 100) (closed))
+   )
+   (terminal
+    (body (symbol "PIN") (pt 0 0) (rot 0) (mir 0) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 0 -100) (rot 0) (mir 0) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 0 -200) (rot 0) (mir 0) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+  )
+  (symbol "PIN"
+   (units THOU)
+   (origin (pt 0 0))
+   (graphic
+    (stroke 10)
+    (path (pt 0 0) (pt 200 0))))
+  (symbol "PINSHORT"
+   (units THOU)
+   (origin (pt 0 0))
+   (graphic
+    (stroke 10)
+    (path (pt 0 0) (pt 100 0))))
+  (package "STPS1L40M"
+   (units MM)
+   (layer TASM
+    (graphic
+     (stroke 0.2)
+     (path
+      (closed true)
+      (pt -1.495 0.95)
+      (pt 0.405 0.95)
+      (pt 0.405 -0.95)
+      (pt -1.495 -0.95)
+      (pt -1.495 0.95))))
+   (layer OCCA
+    (graphic
+     (stroke 0.1)
+     (path
+      (closed true)
+      (pt -2.705 1.515)
+      (pt 2.705 1.515)
+      (pt 2.705 -1.515)
+      (pt -2.705 -1.515)
+      (pt -2.705 1.515))))
+   (layer TSLK
+    (graphic
+     (stroke 0.1)
+     (path
+      (closed false)
+      (pt 0.405 0.95)
+      (pt 0.405 -0.95))))
+   (leg 1 (pt -1.955 0.000) (padstack 0))
+   (leg 2 (pt -0.795 0.000) (padstack 2))
+   (leg 3 (pt 1.515 0.000) (padstack 3))
+   (padstack 0
+    (plated false)
+    (pad (layer TCOP) (rectf 0.500 1.100 0 0 90.000))
+   )
+   (padstack 2
+    (plated false)
+    (pad (layer TCOP) (rectf 1.820 2.030 0 0 90.000))
+   )
+   (padstack 3
+    (plated false)
+    (pad (layer TCOP) (rectf 0.750 1.380 0 0 0.000))
+   )
+   (model "STPS1L40M.stp"
+    (euler 90 0 0)
+    (offset 0 0 0)
+   )
+  )
+ )
+)

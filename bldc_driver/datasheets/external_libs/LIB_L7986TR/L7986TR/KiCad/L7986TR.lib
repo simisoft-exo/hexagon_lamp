@@ -1,0 +1,32 @@
+EESchema-LIBRARY Version 2.3
+#encoding utf-8
+#SamacSys ECAD Model L7986TR
+#/379341/1491498/2.50/11/4/Power Supply
+DEF L7986TR PS 0 30 Y Y 1 F N
+F0 "PS" 1050 300 50 H V L CNN
+F1 "L7986TR" 1050 200 50 H V L CNN
+F2 "SON50P300X300X100-11N-D" 1050 100 50 H I L CNN
+F3 "http://www.st.com/content/ccc/resource/technical/document/datasheet/f4/de/ae/ae/a3/9b/40/d9/DM00041568.pdf/files/DM00041568.pdf/jcr:content/translations/en.DM00041568.pdf" 1050 0 50 H I L CNN
+F4 "STMICROELECTRONICS - L7986TR - DC/DC CONV, BUCK, 250KHZ, VFQFN-10" 1050 -100 50 H I L CNN "Description"
+F5 "1" 1050 -200 50 H I L CNN "Height"
+F6 "511-L7986TR" 1050 -300 50 H I L CNN "Mouser Part Number"
+F7 "https://www.mouser.co.uk/ProductDetail/STMicroelectronics/L7986TR?qs=2YQBRVeZizJbRiSxRz10mg%3D%3D" 1050 -400 50 H I L CNN "Mouser Price/Stock"
+F8 "STMicroelectronics" 1050 -500 50 H I L CNN "Manufacturer_Name"
+F9 "L7986TR" 1050 -600 50 H I L CNN "Manufacturer_Part_Number"
+DRAW
+X OUT_1 1 0 0 200 R 50 50 0 0 P
+X OUT_2 2 0 -100 200 R 50 50 0 0 P
+X SYNCH 3 0 -200 200 R 50 50 0 0 P
+X EN 4 0 -300 200 R 50 50 0 0 P
+X COMP 5 0 -400 200 R 50 50 0 0 P
+X EP 11 600 -900 200 U 50 50 0 0 P
+X VCC_2 10 1200 0 200 L 50 50 0 0 P
+X VCC_1 9 1200 -100 200 L 50 50 0 0 P
+X GND 8 1200 -200 200 L 50 50 0 0 P
+X FSW 7 1200 -300 200 L 50 50 0 0 P
+X FB 6 1200 -400 200 L 50 50 0 0 P
+P 5 0 1 6 200 100 1000 100 1000 -700 200 -700 200 100 N
+ENDDRAW
+ENDDEF
+#
+#End Library

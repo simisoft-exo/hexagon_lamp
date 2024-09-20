@@ -1,0 +1,9 @@
+Manufacturer=STMicroelectronics
+PartNumber=STPS1L40M
+PartCategory=Schottky Diode
+PackageCategory=Other
+PinCount=3
+Version=1.3
+Released=2018-05-20 23:17:22
+Downloaded=2024-09-20 08:37:25
+3D=Y

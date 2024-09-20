@@ -1,0 +1,9 @@
+Manufacturer=STMicroelectronics
+PartNumber=LDFPVR
+PartCategory=Integrated Circuit
+PackageCategory=Small Outline No-lead
+PinCount=7
+Version=1.1
+Released=2019-10-09 22:27:12
+Downloaded=2024-09-19 17:03:22
+3D=Y

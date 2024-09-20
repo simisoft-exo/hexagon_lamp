@@ -1,0 +1,16 @@
+.STPS1L40M :1 ;STMICROELECTRONICS - STPS1L40M - SCHOTTKY RECTIFIER, 1A, 40V, DO-216AA
+STPS1L40M
+*STM D
+*NGS
+*PLB 1="K_1" 2="K_2" 3="A"
+*MXP 3
+*DFN STPS1L40M
+~!Mouser Part Number (511-STPS1L40M)
+~!Link Mouser Price/Stock (https://www.mouser.co.uk/ProductDetail/STMicroelectronics/STPS1L40M?qs=1tTY8DFIKADyj1WerxBVhA%3D%3D)
+~!Manufacturer_Name (STMicroelectronics)
+~!Manufacturer_Part_Number (STPS1L40M)
+~!Link Datasheet (http://www.st.com/content/ccc/resource/technical/document/datasheet/62/69/a4/97/73/11/43/c2/CD00003015.pdf/files/CD00003015.pdf/jcr:content/translations/en.CD00003015.pdf)
+~!Height (1mm)
+~!3D_Model (STPS1L40M)
+STPS1L40M
+1.1!U 2.1!U 3.1!U 

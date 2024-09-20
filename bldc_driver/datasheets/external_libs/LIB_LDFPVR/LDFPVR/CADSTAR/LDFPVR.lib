@@ -1,0 +1,16 @@
+.LDFPVR :1 ;STMicroelectronics LDFPVR, LDO Voltage Regulator, Adjustable 1A, 0.8  12 V +/-1.5%, 6-Pin DFN
+SON65P200X200X100-7N-D
+*STM IC
+*NGS
+*PLB 1="VOUT" 2="ADJ/NC" 3="PG" 4="GND_1" 5="EN" 6="VIN" 7="GND_2"
+*MXP 7
+*DFN LDFPVR
+~!Mouser Part Number (511-LDFPVR)
+~!Link Mouser Price/Stock (https://www.mouser.co.uk/ProductDetail/STMicroelectronics/LDFPVR?qs=xLDY6iXSiQbeQdnd6kJYEg%3D%3D)
+~!Manufacturer_Name (STMicroelectronics)
+~!Manufacturer_Part_Number (LDFPVR)
+~!Link Datasheet (http://www.st.com/content/ccc/resource/technical/document/datasheet/3e/64/32/d3/73/04/4a/70/DM00099995.pdf/files/DM00099995.pdf/jcr:content/translations/en.DM00099995.pdf)
+~!Height (1mm)
+~!3D_Model (LDFPVR)
+LDFPVR
+1.1!U 2.1!U 3.1!U 7.1!U 6.1!U 5.1!U 4.1!U 

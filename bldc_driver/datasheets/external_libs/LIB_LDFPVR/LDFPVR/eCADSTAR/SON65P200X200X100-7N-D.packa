@@ -1,0 +1,13 @@
+(unit MM)
+
+(package "LDFPVR"
+    (type UNDEF)
+    (uver 2)
+    (cuser "SamacSys")
+    (uuser "SamacSys")
+    (utime 2019-10-09-22:27:12)
+    (mountForm default
+        (footprintRef "SON65P200X200X100-7N-D")
+        (spec "System")
+    )
+)

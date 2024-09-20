@@ -1,0 +1,11 @@
+FILE_TYPE = MULTI_PHYS_TABLE;
+
+PART 'LDFPVR'
+CLASS = IC
+{========================================================================================}
+:"MANUFACTURER_NAME", "MANUFACTURER_PART_NUMBER"= "PART_NUMBER", "JEDEC_TYPE", "PACK_TYPE", "MOUSER_PART_NUMBER", "MOUSER_PRICE/STOCK", "DESCRIPTION", "DATASHEET", "HEIGHT";
+{========================================================================================}
+ "STMicroelectronics", "LDFPVR" (!) = "", "SON65P200X200X100-7N-D", "Small Outline No-lead", "511-LDFPVR", "https://www.mouser.co.uk/ProductDetail/STMicroelectronics/LDFPVR?qs=xLDY6iXSiQbeQdnd6kJYEg%3D%3D", "STMicroelectronics LDFPVR, LDO Voltage Regulator, Adjustable 1A, 0.8  12 V +/-1.5%, 6-Pin DFN", "http://www.st.com/content/ccc/resource/technical/document/datasheet/3e/64/32/d3/73/04/4a/70/DM00099995.pdf/files/DM00099995.pdf/jcr:content/translations/en.DM00099995.pdf", "1 mm"
+END_PART
+
+END.

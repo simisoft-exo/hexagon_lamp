@@ -1,0 +1,16 @@
+.L7986TR :1 ;STMICROELECTRONICS - L7986TR - DC/DC CONV, BUCK, 250KHZ, VFQFN-10
+SON50P300X300X100-11N-D
+*STM PS
+*NGS
+*PLB 1="OUT_1" 2="OUT_2" 3="SYNCH" 4="EN" 5="COMP" 6="FB" 7="FSW" 8="GND" 9="VCC_1" 10="VCC_2" 11="EP"
+*MXP 11
+*DFN L7986TR
+~!Mouser Part Number (511-L7986TR)
+~!Link Mouser Price/Stock (https://www.mouser.co.uk/ProductDetail/STMicroelectronics/L7986TR?qs=2YQBRVeZizJbRiSxRz10mg%3D%3D)
+~!Manufacturer_Name (STMicroelectronics)
+~!Manufacturer_Part_Number (L7986TR)
+~!Link Datasheet (http://www.st.com/content/ccc/resource/technical/document/datasheet/f4/de/ae/ae/a3/9b/40/d9/DM00041568.pdf/files/DM00041568.pdf/jcr:content/translations/en.DM00041568.pdf)
+~!Height (1mm)
+~!3D_Model (L7986TR)
+L7986TR
+1.1!U 2.1!U 3.1!U 4.1!U 5.1!U 11.1!U 10.1!U 9.1!U 8.1!U 7.1!U 6.1!U 
