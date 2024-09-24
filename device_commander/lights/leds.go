@@ -16,6 +16,8 @@ package lights
 
 import (
 	"fmt"
+	"log"
+	"time"
 
 	ws2811 "github.com/rpi-ws281x/rpi-ws281x-go"
 )
@@ -30,6 +32,26 @@ const (
 
 type LEDDriver struct {
 	ws *ws2811.WS2811
+}
+type HexagonPanel struct {
+	Width  int
+	Height int
+	Leds   []RGBW
+	Driver *LEDDriver
+}
+
+func NewHexagonPanel() (*HexagonPanel, error) {
+	driver, err := makeDriver()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create LED driver: %w", err)
+	}
+
+	return &HexagonPanel{
+		Width:  LUT_W,
+		Height: LUT_H,
+		Leds:   make([]RGBW, 54), // 54 is the highest LED index in the LUT + 1
+		Driver: driver,
+	}, nil
 }
 
 func makeDriver() (*LEDDriver, error) {
@@ -66,4 +88,23 @@ func (d *LEDDriver) Render(data []uint32) error {
 
 	copy(d.ws.Leds(0), data)
 	return d.ws.Render()
+}
+
+// Initialize the LED panel
+func InitializeLEDs(panel *HexagonPanel) {
+	// Create a slice to hold LED data
+	ledData := make([]uint32, 54)
+
+	// Set all LEDs to off (black)
+	for i := range ledData {
+		ledData[i] = 0 // RGBW: 0x00000000 (all channels off)
+	}
+
+	// Render the initial state
+	if err := panel.Driver.Render(ledData); err != nil {
+		log.Printf("Error rendering initial LED state: %v", err)
+	}
+
+	// Short delay to ensure LEDs are initialized
+	time.Sleep(100 * time.Millisecond)
 }

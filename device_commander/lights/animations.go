@@ -1,8 +1,8 @@
 package lights
 
 import (
-	"fmt"
 	"log"
+	"math"
 	"time"
 
 	"github.com/fogleman/gg"
@@ -37,60 +37,28 @@ const (
 	LUT_W            = 11
 	LUT_H            = 12
 	LUT_LEN          = LUT_W * LUT_H
+	__               = -1
 )
 
 var LUT = [LUT_LEN]int{
-	-1, -1, -1, 0, -1, 1, -1, 2, -1, -1, -1,
-	-1, -1, 6, -1, 5, -1, 4, -1, 3, -1, -1,
-	-1, -1, 7, -1, 8, -1, 9, -1, 10, -1, -1,
-	-1, 15, -1, 14, -1, 13, -1, 12, -1, 11, -1,
-	-1, 16, -1, 17, -1, 18, -1, 19, -1, 20, -1,
-	26, -1, 25, -1, 24, -1, 23, -1, 22, -1, 21,
-	27, -1, 28, -1, 29, -1, 30, -1, 31, -1, 32,
-	-1, 37, -1, 36, -1, 35, -1, 34, -1, 33, -1,
-	-1, 38, -1, 39, -1, 40, -1, 41, -1, 42, -1,
-	-1, -1, 46, -1, 45, -1, 44, -1, 43, -1, -1,
-	-1, -1, 47, -1, 48, -1, 49, -1, 50, -1, -1,
-	-1, -1, -1, 53, -1, 52, -1, 51, -1, -1, -1,
+	__, __, __, 0, __, 1, __, 2, __, __, __,
+	__, __, 6, __, 5, __, 4, __, 3, __, __,
+	__, __, 7, __, 8, __, 9, __, 10, __, __,
+	__, 15, __, 14, __, 13, __, 12, __, 11, __,
+	__, 16, __, 17, __, 18, __, 19, __, 20, __,
+	26, __, 25, __, 24, __, 23, __, 22, __, 21,
+	27, __, 28, __, 29, __, 30, __, 31, __, 32,
+	__, 37, __, 36, __, 35, __, 34, __, 33, __,
+	__, 38, __, 39, __, 40, __, 41, __, 42, __,
+	__, __, 46, __, 45, __, 44, __, 43, __, __,
+	__, __, 47, __, 48, __, 49, __, 50, __, __,
+	__, __, __, 53, __, 52, __, 51, __, __, __,
 }
 
-type HexagonPanel struct {
-	Width  int
-	Height int
-	Leds   []RGBW
-	Driver *LEDDriver
-}
+func growingShrinkingHexagon(panel *HexagonPanel) {
+	maxSize := float64(LUT_W)/2 + 1 // Maximum size of the hexagon
 
-func NewHexagonPanel() (*HexagonPanel, error) {
-	driver, err := makeDriver()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create LED driver: %w", err)
-	}
-
-	return &HexagonPanel{
-		Width:  LUT_W,
-		Height: LUT_H,
-		Leds:   make([]RGBW, 54), // 54 is the highest LED index in the LUT + 1
-		Driver: driver,
-	}, nil
-}
-
-func RunAnimations() {
-
-	panel, err := NewHexagonPanel()
-	if err != nil {
-		log.Fatalf("Error creating hexagon panel: %v", err)
-	}
-
-	for {
-		RunGrowingShrinkingHexagon(panel)
-		// Add more animations here if needed
-	}
-}
-
-func RunGrowingShrinkingHexagon(panel *HexagonPanel) {
-	maxSize := float64(LUT_W) / 2 // Maximum size of the hexagon
-
+	log.Printf("Playing animation: growingShrinking hexagon: %f", maxSize)
 	for {
 		for size := 0.0; size <= maxSize; size += 0.1 {
 			renderHexagonFrame(panel, size)
@@ -107,9 +75,11 @@ func renderHexagonFrame(panel *HexagonPanel, size float64) {
 	dc.SetRGB(0, 0, 0) // Set background to black
 	dc.Clear()
 
-	// Draw the hexagon
-	centerX, centerY := float64(LUT_W)/2, float64(LUT_H)/2
-	DrawHexagon(dc, centerX, centerY, size, RGBW{R: 255, G: 0, B: 0, W: 0}) // Red hexagon
+	// Calculate color based on size (gradient from red to blue)
+	r := uint8(255 * (size / (float64(LUT_W) / 2)))
+	g := uint8(0)
+	b := uint8(255 * (1 - (size / (float64(LUT_W) / 2))))
+	DrawHexagon(dc, float64(LUT_W)/2, float64(LUT_H)/2, size, RGBW{R: r, G: g, B: b, W: 0})
 
 	// Convert the drawing to LED data
 	panel.DrawToPanel(dc)
@@ -117,13 +87,16 @@ func renderHexagonFrame(panel *HexagonPanel, size float64) {
 	// Convert RGBW to uint32 for the LED driver
 	ledData := make([]uint32, len(panel.Leds))
 	for i, led := range panel.Leds {
-		ledData[i] = uint32(led.R)<<16 | uint32(led.G)<<8 | uint32(led.B)
+		ledData[i] = uint32(led.R)<<24 | uint32(led.G)<<16 | uint32(led.B)<<8 | uint32(led.W)
 	}
 
 	// Render the frame
 	if err := panel.Driver.Render(ledData); err != nil {
 		log.Printf("Error rendering frame: %v", err)
 	}
+
+	// Add debug logging
+	log.Printf("Rendered frame with size: %f, LED data: %v", size, ledData)
 
 	time.Sleep(50 * time.Millisecond) // Adjust speed as needed
 }
@@ -132,71 +105,143 @@ func (h *HexagonPanel) DrawToPanel(dc *gg.Context) {
 	for y := 0; y < h.Height; y++ {
 		for x := 0; x < h.Width; x++ {
 			index := LUT[y*h.Width+x]
-			if index != -1 {
+			if index != __ {
 				r, g, b, a := dc.Image().At(x, y).RGBA()
 				h.Leds[index] = RGBW{
 					R: uint8(r >> 8),
 					G: uint8(g >> 8),
 					B: uint8(b >> 8),
-					W: uint8(a >> 8), // Using alpha value for W
+					W: uint8(a >> 8),
 				}
 			}
 		}
 	}
 }
 
-func Run() {
-	panel, err := NewHexagonPanel()
-	if err != nil {
-		log.Fatalf("Error creating hexagon panel: %v", err)
-	}
-	// Define animation functions
-	animations := []func(*HexagonPanel){
-		func(panel *HexagonPanel) {
-			// Original animation
-			for i := 0; i < len(panel.Leds); i++ {
-				panel.Leds[i] = RGBW{R: 255, G: 255, B: 255, W: 255}
-				ledData := make([]uint32, len(panel.Leds))
-				for j, led := range panel.Leds {
-					ledData[j] = uint32(led.W)<<24 | uint32(led.R)<<16 | uint32(led.G)<<8 | uint32(led.B)
-				}
-				if err := panel.Driver.Render(ledData); err != nil {
-					log.Printf("Error rendering frame: %v", err)
-				}
-				time.Sleep(50 * time.Millisecond)
-			}
-			time.Sleep(500 * time.Millisecond)
-			for i := 0; i < len(panel.Leds); i++ {
-				panel.Leds[i] = RGBW{R: 0, G: 0, B: 0, W: 0}
-			}
-			ledData := make([]uint32, len(panel.Leds))
-			if err := panel.Driver.Render(ledData); err != nil {
-				log.Printf("Error rendering frame: %v", err)
-			}
-			time.Sleep(500 * time.Millisecond)
-		},
-		func(panel *HexagonPanel) {
-			// Hexagon frame animation
-			maxSize := float64(LUT_W) / 2 // Use half of the context width as max size
-			for size := 0.0; size <= maxSize; size += maxSize / 10 {
-				renderHexagonFrame(panel, size)
-			}
-			for size := maxSize; size >= 0.0; size -= maxSize / 10 {
-				renderHexagonFrame(panel, size)
-			}
-			// Clear the panel after animation
-			ledData := make([]uint32, len(panel.Leds))
-			if err := panel.Driver.Render(ledData); err != nil {
-				log.Printf("Error clearing panel: %v", err)
-			}
-		},
+func whiteLEDCascade(panel *HexagonPanel) {
+	log.Println("Playing animation: White LED Cascade")
+	// White LED Cascade animation
+	for i := 0; i < len(panel.Leds); i++ {
+		// Set each LED to full white (255 for all channels)
+		panel.Leds[i] = RGBW{R: 120, G: 120, B: 120, W: 120}
+
+		// Create a slice to hold LED data for rendering
+		ledData := make([]uint32, len(panel.Leds))
+
+		// Convert RGBW values to uint32 for each LED
+		for j, led := range panel.Leds {
+			ledData[j] = uint32(led.R)<<24 | uint32(led.G)<<16 | uint32(led.B)<<8 | uint32(led.W)
+		}
+
+		// Render the current frame
+		if err := panel.Driver.Render(ledData); err != nil {
+			log.Printf("Error rendering frame: %v", err)
+		}
+
+		// Pause briefly between each LED lighting up
+		time.Sleep(200 * time.Millisecond)
 	}
 
-	go func() {
-		for {
-			for _, animation := range animations {
-				animation(panel)
-			}
+	// Pause after all LEDs are lit
+	time.Sleep(2 * time.Second)
+}
+
+func offLEDCascade(panel *HexagonPanel) {
+	log.Println("Playing animation: Turn Off LEDs One by One")
+
+	// Create a slice to hold LED data for rendering
+	ledData := make([]uint32, len(panel.Leds))
+
+	// Turn off LEDs one by one
+	for i := 0; i < len(ledData); i++ {
+		// Turn off the current LED
+		ledData[i] = 0 // All channels off
+
+		// Render the current frame
+		if err := panel.Driver.Render(ledData); err != nil {
+			log.Printf("Error rendering frame: %v", err)
 		}
-	}()
+
+		// Pause briefly between turning off each LED
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	// Pause after all LEDs are off
+	time.Sleep(2 * time.Second)
+}
+
+func rainbowHueShift(panel *HexagonPanel) {
+	log.Println("Playing animation: Rainbow Hue Shift")
+
+	// Create a slice to hold LED data for rendering
+	ledData := make([]uint32, len(panel.Leds))
+
+	// Define the duration of one complete hue cycle
+	cycleDuration := 180 * time.Second
+
+	// Calculate the number of steps for a smooth transition
+	steps := 500
+
+	for step := 0; step < steps; step++ {
+		// Calculate the current hue (0-360 degrees)
+		hue := float64(step) / float64(steps) * 360.0
+
+		// Convert HSV to RGB
+		r, g, b := hsvToRgb(hue, 1.0, 1.0)
+
+		// Set all LEDs to the current color
+		for i := range ledData {
+			ledData[i] = uint32(r)<<24 | uint32(g)<<16 | uint32(b)<<8 | uint32(0) // W channel is 0
+		}
+
+		// Render the current frame
+		if err := panel.Driver.Render(ledData); err != nil {
+			log.Printf("Error rendering frame: %v", err)
+		}
+
+		// Calculate sleep duration for smooth transition
+		time.Sleep(cycleDuration / time.Duration(steps))
+	}
+}
+
+// hsvToRgb converts HSV (Hue, Saturation, Value) to RGB
+func hsvToRgb(h, s, v float64) (uint8, uint8, uint8) {
+	c := v * s
+	x := c * (1 - math.Abs(math.Mod(h/60, 2)-1))
+	m := v - c
+
+	var r, g, b float64
+
+	switch {
+	case h < 60:
+		r, g, b = c, x, 0
+	case h < 120:
+		r, g, b = x, c, 0
+	case h < 180:
+		r, g, b = 0, c, x
+	case h < 240:
+		r, g, b = 0, x, c
+	case h < 300:
+		r, g, b = x, 0, c
+	default:
+		r, g, b = c, 0, x
+	}
+
+	return uint8((r + m) * 255), uint8((g + m) * 255), uint8((b + m) * 255)
+}
+
+func Run(panel *HexagonPanel) {
+	// Define animation functions
+	animations := []func(*HexagonPanel){
+		// growingShrinkingHexagon,
+		rainbowHueShift,
+		offLEDCascade,
+		whiteLEDCascade,
+	}
+
+	for {
+		for _, animation := range animations {
+			animation(panel)
+		}
+	}
 }

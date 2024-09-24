@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
@@ -12,8 +14,10 @@ import (
 
 	"device_commander/comms"
 	"device_commander/lights"
+	"device_commander/motors"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rs/cors"
 )
 
 type ScreenUpdate = comms.ScreenUpdate
@@ -32,7 +36,21 @@ var (
 	logFile          *os.File
 	sendToAllBuffer  string
 	btBuffer         string
+	panel            *lights.HexagonPanel
+	currentPattern   *motors.Pattern
 )
+
+// Initialize LEDs in init() function
+func init() {
+	var err error
+	panel, err = lights.NewHexagonPanel()
+	if err != nil {
+		log.Fatalf("Error creating hexagon panel: %v", err)
+	}
+	lights.InitializeLEDs(panel)
+	log.Println("Initialized LEDs")
+	connections = make([]*comms.SerialConnection, 0, 7)
+}
 
 func main() {
 
@@ -47,9 +65,11 @@ func main() {
 	log.SetPrefix("main: ")
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 
+	if err != nil {
+		log.Fatalf("Error creating hexagon panel: %v", err)
+	}
+
 	comms.SetScreenUpdateChan(screenUpdateChan)
-	go lights.Run()
-	go comms.RunBluetooth()
 
 	// Device info for all 7 devices
 	devicesJSON := `[
@@ -66,8 +86,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	connections = make([]*comms.SerialConnection, 0, 7)
 
 	var wg sync.WaitGroup
 	connectionChan := make(chan *comms.SerialConnection, len(devices))
@@ -119,9 +137,15 @@ func main() {
 	// Start the screen update goroutine
 	go screenUpdateLoop()
 
+	go comms.RunBluetooth()
+	go lights.Run(panel)
+
 	// Start the screen refresh ticker
 	screenRefreshTicker = time.NewTicker(100 * time.Millisecond)
 	defer screenRefreshTicker.Stop()
+
+	// Start the HTTP server
+	go startHTTPServer()
 
 	drawScreen()
 	for {
@@ -139,6 +163,9 @@ func main() {
 					return
 				case tcell.KeyEnter:
 					if currentPortIndex == len(connections) {
+						if sendToAllBuffer == "PAT" {
+							go playCurrentPattern()
+						}
 						comms.SendCommandToAll(sendToAllBuffer, &connectionsMutex, connections)
 						sendToAllBuffer = ""
 					} else if currentPortIndex == len(connections)+1 {
@@ -172,8 +199,8 @@ func main() {
 				case tcell.KeyBacktab:
 					currentPortIndex = (currentPortIndex - 1 + len(connections) + 2) % (len(connections) + 2)
 				case tcell.KeyRune:
-					if ev.Rune() == 'q' && ev.Modifiers() == tcell.ModAlt {
-						return // Exit when Alt+Q is pressed
+					if ev.Rune() == 'q' && (ev.Modifiers() == tcell.ModAlt || ev.Modifiers() == tcell.ModMeta) {
+						return // Exit when Alt+Q or Option+Q is pressed
 					}
 					if currentPortIndex == len(connections) {
 						sendToAllBuffer += string(ev.Rune())
@@ -329,5 +356,68 @@ func screenUpdateLoop() {
 		case <-screenRefreshTicker.C:
 			drawScreen()
 		}
+	}
+}
+
+func startHTTPServer() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/pattern", handlePattern)
+
+	// Create a new CORS handler
+	c := cors.New(cors.Options{
+		AllowedOrigins: []string{"*"}, // Allow all origins
+		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders: []string{"Accept", "Content-Type", "Content-Length", "Accept-Encoding", "Authorization"},
+	})
+
+	// Wrap your mux with the CORS handler
+	handler := c.Handler(mux)
+
+	log.Println("Starting HTTP server on :8080")
+	if err := http.ListenAndServe(":8080", handler); err != nil {
+		log.Fatalf("Failed to start HTTP server: %v", err)
+	}
+}
+
+func handlePattern(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Read the raw body
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Error reading request body", http.StatusInternalServerError)
+		return
+	}
+
+	// Log the received JSON
+	log.Printf("Received JSON: %s", string(body))
+
+	var pattern motors.Pattern
+	err = json.Unmarshal(body, &pattern)
+	if err != nil {
+		log.Printf("Error decoding JSON: %v", err)
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	currentPattern = &pattern
+	log.Printf("Received new pattern: %+v", pattern)
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Pattern received successfully"))
+}
+
+func playCurrentPattern() {
+	if currentPattern == nil {
+		log.Println("No pattern to play")
+		return
+	}
+
+	err := motors.ScheduleMotorMovements(currentPattern, &connectionsMutex, connections)
+	if err != nil {
+		log.Printf("Error playing pattern: %v", err)
 	}
 }

@@ -1,4 +1,4 @@
-package main
+package motors
 
 import (
 	"encoding/json"
@@ -22,10 +22,10 @@ func readMIDIFile(filePath string) (*smf.SMF, smf.TimeFormat, error) {
 	return smfFile, smfFile.TimeFormat, nil
 }
 
-type Segment struct {
-	Velocity float64
-	Duration int64
-}
+// type Segment struct {
+// 	Velocity float64
+// 	Duration int64
+// }
 
 type MotorTrackToPattern struct {
 	Track int64
@@ -86,10 +86,12 @@ func printMIDIFileInfo(smfFile *smf.SMF, timeFormat smf.TimeFormat, filePath str
 				} else {
 					velocity = math.Max(0, math.Min(10, (float64(vel)/127.0)*10.0))
 				}
-				segments = append(segments, Segment{
-					Duration: duration,
-					Velocity: velocity,
-				})
+				if duration <= 10000 {
+					segments = append(segments, Segment{
+						Duration: int(duration * 10),
+						Speed:    velocity,
+					})
+				}
 			}
 		}
 		patterns[mapping.Motor] = segments
@@ -152,7 +154,7 @@ func printMIDIFileInfo(smfFile *smf.SMF, timeFormat smf.TimeFormat, filePath str
 	}
 }
 
-func main() {
+func RunMidi() {
 	if len(os.Args) < 2 {
 		fmt.Println("Please provide a MIDI file path as an argument")
 		os.Exit(1)
