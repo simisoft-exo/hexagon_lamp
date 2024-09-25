@@ -2,28 +2,89 @@ import React, { useState, useRef, useEffect } from 'react';
 import './App.css';
 import axios from 'axios';
 
-function TrackVisualization({ track }) {
+function TrackVisualization({ track, updateSegment }) {
   const totalDuration = track.reduce((sum, segment) => sum + segment.duration, 0);
-  const maxSpeed = 6; // Unchanged
+  const maxSpeed = 6;
+  const containerRef = useRef(null);
+
+  const handleSpeedDrag = (event, segmentId, initialY) => {
+    if (!containerRef.current) return;
+
+    const containerHeight = containerRef.current.clientHeight;
+    const deltaY = initialY - event.clientY;
+    const speedChange = (deltaY / containerHeight) * 100;
+    
+    const segment = track.find(seg => seg.id === segmentId);
+    if (!segment) return;
+
+    const newSpeed = Math.max(0, Math.min(100, segment.speed + speedChange));
+    updateSegment(segmentId, 'speed', Math.round(newSpeed));
+  };
+
+  const handleDurationDrag = (event, segmentId, initialX) => {
+    if (!containerRef.current) return;
+
+    const containerWidth = containerRef.current.clientWidth;
+    const deltaX = event.clientX - initialX;
+    const durationChange = (deltaX / containerWidth) * totalDuration;
+    
+    const segment = track.find(seg => seg.id === segmentId);
+    if (!segment) return;
+
+    const newDuration = Math.max(100, Math.min(30000, segment.duration + durationChange));
+    updateSegment(segmentId, 'duration', Math.round(newDuration));
+  };
 
   return (
     <div className="track-visualization my-4 p-4 border-2 border-gray-300 rounded-lg">
       <h2 className="text-xl font-semibold mb-2">Track Visualization</h2>
-      <div className="relative h-32 bg-gray-200 rounded">
+      <div ref={containerRef} className="relative h-32 bg-gray-200 rounded">
         {track.map((segment, index) => {
           const width = (segment.duration / totalDuration) * 100;
-          const height = ((segment.speed * 0.06) / maxSpeed) * 100; // Unchanged
+          const height = ((segment.speed * 0.06) / maxSpeed) * 100;
           const left = track
             .slice(0, index)
             .reduce((sum, seg) => sum + (seg.duration / totalDuration) * 100, 0);
           return (
             <div
               key={segment.id}
-              className="absolute bottom-0 rounded-t-lg bg-blue-500 border border-blue-600"
+              className="absolute bottom-0 rounded-t-lg bg-blue-500 border border-blue-600 cursor-move"
               style={{
                 left: `${left}%`,
                 width: `${width}%`,
                 height: `${height}%`,
+              }}
+              onMouseDown={(e) => {
+                const initialY = e.clientY;
+                const initialX = e.clientX;
+                let isDraggingSpeed = false;
+                let isDraggingDuration = false;
+
+                const handleMouseMove = (moveEvent) => {
+                  if (!isDraggingSpeed && !isDraggingDuration) {
+                    const deltaY = Math.abs(moveEvent.clientY - initialY);
+                    const deltaX = Math.abs(moveEvent.clientX - initialX);
+                    if (deltaY > deltaX) {
+                      isDraggingSpeed = true;
+                    } else {
+                      isDraggingDuration = true;
+                    }
+                  }
+
+                  if (isDraggingSpeed) {
+                    handleSpeedDrag(moveEvent, segment.id, initialY);
+                  } else if (isDraggingDuration) {
+                    handleDurationDrag(moveEvent, segment.id, initialX);
+                  }
+                };
+
+                const handleMouseUp = () => {
+                  document.removeEventListener('mousemove', handleMouseMove);
+                  document.removeEventListener('mouseup', handleMouseUp);
+                };
+
+                document.addEventListener('mousemove', handleMouseMove);
+                document.addEventListener('mouseup', handleMouseUp);
               }}
             >
               <div className="text-xs text-white p-1">
@@ -187,7 +248,7 @@ function App() {
             ))}
           </div>
         </div>
-        <TrackVisualization track={track} />
+        <TrackVisualization track={track} updateSegment={updateSegment} />
         <div className="json-output border-2 border-gray-300 rounded-lg p-4">
           <h2 className="text-xl font-semibold mb-2">Pattern JSON</h2>
           <pre className="bg-gray-100 p-4 rounded overflow-x-auto">
