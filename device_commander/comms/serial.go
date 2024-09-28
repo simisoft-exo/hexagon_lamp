@@ -1,6 +1,7 @@
 package comms
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"log"
@@ -89,12 +90,6 @@ func OpenSerialPort(port string, connections []*SerialConnection, connectionsMut
 	// Start periodic handshake goroutine
 	go PeriodicHandshake(serialConn, connections, connectionsMutex)
 
-	// Create a channel for screen updates
-	screenUpdateChan := make(chan ScreenUpdate, 100)
-
-	// Start reading output
-	go ReadSerialOutput(serialConn, screenUpdateChan, connections, connectionsMutex)
-
 	debugLog("Successfully opened and initialized port %s", port)
 	return serialConn, nil
 }
@@ -157,38 +152,25 @@ func waitForAnyResponse(conn *SerialConnection, expectedResponses []string, time
 	return "", fmt.Errorf("timeout waiting for response from %s. Received data: %s", conn.DeviceID, conn.Output)
 }
 
-func ReadSerialOutput(conn *SerialConnection, screenUpdateChan chan<- ScreenUpdate, connections []*SerialConnection, connectionsMutex *sync.Mutex) {
-	buffer := make([]byte, 128)
+func ReadSerialOutput(conn *SerialConnection, deviceUpdateChan chan<- ScreenUpdate, connections []*SerialConnection, connectionsMutex *sync.Mutex) {
+	reader := bufio.NewReader(conn.Port)
 	for {
-		if conn == nil || conn.Port == nil {
-			debugLog("Connection or port is nil for device %s", conn.DeviceID)
-			go AttemptReconnection(conn, connections, connectionsMutex)
-			return // Exit this goroutine, as reconnection will start a new one if successful
-		}
-
-		n, err := conn.Port.Read(buffer)
+		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err != io.EOF {
 				debugLog("Error reading from %s: %v", conn.DeviceID, err)
 			}
 			go AttemptReconnection(conn, connections, connectionsMutex)
-			return // Exit this goroutine, as reconnection will start a new one if successful
+			return
 		}
-		if n > 0 {
-			received := string(buffer[:n])
-			debugLog("Received %d bytes from device %s: %s", n, conn.DeviceID, received)
 
-			if strings.Contains(received, "HEARTBEAT") {
-				debugLog("Heartbeat received from device %s", conn.DeviceID)
-			}
+		line = strings.TrimSpace(line)
+		debugLog("Received from device %s: %s", conn.DeviceID, line)
 
-			// Send update to channel
-			select {
-			case screenUpdateChan <- ScreenUpdate{DeviceID: conn.DeviceID, Output: received}:
-			default:
-				// Channel is full, log a warning
-				debugLog("Warning: Screen update channel is full. Update for device %s dropped.", conn.DeviceID)
-			}
+		select {
+		case deviceUpdateChan <- ScreenUpdate{DeviceID: conn.DeviceID, Output: line + "\n"}:
+		default:
+			debugLog("Warning: Device update channel is full for %s. Update dropped.", conn.DeviceID)
 		}
 	}
 }

@@ -40,6 +40,15 @@ var (
 	currentPattern   *motors.Pattern
 )
 
+type DeviceStatus struct {
+	LastACK       time.Time
+	LastHeartbeat time.Time
+}
+
+var (
+	deviceStatuses map[string]*DeviceStatus
+)
+
 // Initialize LEDs in init() function
 func init() {
 	var err error
@@ -50,6 +59,7 @@ func init() {
 	lights.InitializeLEDs(panel)
 	log.Println("Initialized LEDs")
 	connections = make([]*comms.SerialConnection, 0, 7)
+	deviceStatuses = make(map[string]*DeviceStatus)
 }
 
 func main() {
@@ -87,6 +97,11 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// Initialize device statuses for all devices
+	for _, device := range devices {
+		deviceStatuses[device.DeviceID] = &DeviceStatus{}
+	}
+
 	var wg sync.WaitGroup
 	connectionChan := make(chan *comms.SerialConnection, len(devices))
 
@@ -107,6 +122,9 @@ func main() {
 			conn.DeviceID = dev.DeviceID
 			conn.PortName = dev.SerialPort
 			connectionChan <- conn
+
+			// Start a goroutine to handle updates for this device
+			go handleDeviceUpdates(conn)
 		}(device)
 	}
 
@@ -118,7 +136,6 @@ func main() {
 	for conn := range connectionChan {
 		connections = append(connections, conn)
 		go comms.PeriodicHandshake(conn, connections, &connectionsMutex)
-		go comms.ReadSerialOutput(conn, screenUpdateChan, connections, &connectionsMutex)
 	}
 
 	if len(connections) == 0 {
@@ -245,7 +262,7 @@ func drawScreen() {
 	for i, conn := range sortedConnections {
 		y := i * deviceHeight
 		if y >= availableHeight {
-			break // Stop if we've run out of space
+			break
 		}
 
 		// Draw device header
@@ -256,16 +273,29 @@ func drawScreen() {
 			drawText(0, y, width, headerText)
 		}
 
+		// Draw status line
+		status := deviceStatuses[conn.DeviceID]
+		if status != nil {
+			statusText := fmt.Sprintf("ACK: %s | HEARTBEAT: %s",
+				formatTimestamp(status.LastACK),
+				formatTimestamp(status.LastHeartbeat))
+			drawText(0, y+1, width, statusText)
+
+			log.Printf("Drawing status for Device %s: %s", conn.DeviceID, statusText)
+		} else {
+			log.Printf("No status found for Device %s", conn.DeviceID)
+		}
+
 		// Draw device output
 		lines := strings.Split(conn.Output, "\n")
-		outputHeight := deviceHeight - 1 // Reserve one line for the header
+		outputHeight := deviceHeight - 2 // Reserve two lines for header and status
 		startLine := max(0, len(lines)-outputHeight)
 		for j := 0; j < outputHeight && startLine+j < len(lines); j++ {
-			if y+j+1 >= availableHeight {
+			if y+j+2 >= availableHeight {
 				break
 			}
 			line := lines[startLine+j]
-			drawText(0, y+j+1, width, line)
+			drawText(0, y+j+2, width, line)
 		}
 	}
 
@@ -332,31 +362,70 @@ func limitOutputBuffer(output string) string {
 	return strings.Join(lines, "\n")
 }
 
+// Add this new function at the top level of the file
+func logAllDeviceStatuses() {
+	log.Println("Current status of all devices:")
+	for deviceID, status := range deviceStatuses {
+		log.Printf("Device %s - ACK: %s, HEARTBEAT: %s",
+			deviceID,
+			formatTimestamp(status.LastACK),
+			formatTimestamp(status.LastHeartbeat))
+	}
+}
+
 func screenUpdateLoop() {
+	statusCheckTicker := time.NewTicker(10 * time.Second)
+	defer statusCheckTicker.Stop()
+
 	for {
 		select {
 		case update := <-screenUpdateChan:
 			if update.DeviceID == "BT" {
-				// Special handling for Bluetooth data
+				// Handle Bluetooth updates as before
 				log.Printf("Received Bluetooth data: %s", update.Output)
-				// Clear btBuffer before adding new command
 				btBuffer = update.Output
 				log.Printf("Updated Bluetooth buffer: %s", btBuffer)
-			} else {
-				// Update the connection's output for serial connections
-				connectionsMutex.Lock()
-				for _, conn := range connections {
-					if conn.DeviceID == update.DeviceID {
-						conn.Output = limitOutputBuffer(conn.Output + update.Output)
-						break
-					}
-				}
-				connectionsMutex.Unlock()
 			}
 		case <-screenRefreshTicker.C:
 			drawScreen()
+		case <-statusCheckTicker.C:
+			logAllDeviceStatuses()
 		}
 	}
+}
+
+func processDeviceUpdate(update ScreenUpdate) {
+	connectionsMutex.Lock()
+	defer connectionsMutex.Unlock()
+
+	for _, conn := range connections {
+		if conn.DeviceID == update.DeviceID {
+			if strings.Contains(update.Output, "ACK") {
+				updateDeviceStatus(conn.DeviceID, true, false)
+			}
+			if strings.Contains(update.Output, "HEARTBEAT") {
+				updateDeviceStatus(conn.DeviceID, false, true)
+			}
+
+			filteredOutput := filterAckHeartbeat(update.Output)
+			if filteredOutput != "" {
+				conn.Output = limitOutputBuffer(conn.Output + filteredOutput)
+			}
+			break
+		}
+	}
+}
+
+// Add this new function to filter out ACK and HEARTBEAT messages
+func filterAckHeartbeat(output string) string {
+	lines := strings.Split(output, "\n")
+	var filteredLines []string
+	for _, line := range lines {
+		if !strings.Contains(line, "ACK") && !strings.Contains(line, "HEARTBEAT") {
+			filteredLines = append(filteredLines, line)
+		}
+	}
+	return strings.Join(filteredLines, "\n")
 }
 
 func startHTTPServer() {
@@ -419,5 +488,40 @@ func playCurrentPattern() {
 	err := motors.ScheduleMotorMovements(currentPattern, &connectionsMutex, connections)
 	if err != nil {
 		log.Printf("Error playing pattern: %v", err)
+	}
+}
+
+func formatTimestamp(t time.Time) string {
+	if t.IsZero() {
+		return "N/A"
+	}
+	return t.Format("15:04:05")
+}
+
+func updateDeviceStatus(deviceID string, isACK, isHeartbeat bool) {
+	status, exists := deviceStatuses[deviceID]
+	if !exists {
+		status = &DeviceStatus{}
+		deviceStatuses[deviceID] = status
+		log.Printf("Created new status for device %s", deviceID)
+	}
+
+	now := time.Now()
+	if isACK {
+		status.LastACK = now
+		log.Printf("Updated ACK for device %s: %s", deviceID, now.Format("15:04:05"))
+	}
+	if isHeartbeat {
+		status.LastHeartbeat = now
+		log.Printf("Updated HEARTBEAT for device %s: %s", deviceID, now.Format("15:04:05"))
+	}
+}
+
+func handleDeviceUpdates(conn *comms.SerialConnection) {
+	deviceUpdateChan := make(chan comms.ScreenUpdate, 100)
+	go comms.ReadSerialOutput(conn, deviceUpdateChan, connections, &connectionsMutex)
+
+	for update := range deviceUpdateChan {
+		processDeviceUpdate(update)
 	}
 }
