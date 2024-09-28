@@ -280,10 +280,6 @@ func drawScreen() {
 				formatTimestamp(status.LastACK),
 				formatTimestamp(status.LastHeartbeat))
 			drawText(0, y+1, width, statusText)
-
-			log.Printf("Drawing status for Device %s: %s", conn.DeviceID, statusText)
-		} else {
-			log.Printf("No status found for Device %s", conn.DeviceID)
 		}
 
 		// Draw device output
@@ -394,22 +390,29 @@ func screenUpdateLoop() {
 	}
 }
 
-func processDeviceUpdate(update ScreenUpdate) {
+// Add this new function
+func safeUpdateDeviceStatus(deviceID string, isACK, isHeartbeat bool) {
 	connectionsMutex.Lock()
 	defer connectionsMutex.Unlock()
+	updateDeviceStatus(deviceID, isACK, isHeartbeat)
+}
 
+// Modify the processDeviceUpdate function
+func processDeviceUpdate(update ScreenUpdate) {
 	for _, conn := range connections {
 		if conn.DeviceID == update.DeviceID {
 			if strings.Contains(update.Output, "ACK") {
-				updateDeviceStatus(conn.DeviceID, true, false)
+				safeUpdateDeviceStatus(conn.DeviceID, true, false)
 			}
 			if strings.Contains(update.Output, "HEARTBEAT") {
-				updateDeviceStatus(conn.DeviceID, false, true)
+				safeUpdateDeviceStatus(conn.DeviceID, false, true)
 			}
 
 			filteredOutput := filterAckHeartbeat(update.Output)
 			if filteredOutput != "" {
+				connectionsMutex.Lock()
 				conn.Output = limitOutputBuffer(conn.Output + filteredOutput)
+				connectionsMutex.Unlock()
 			}
 			break
 		}
@@ -421,7 +424,8 @@ func filterAckHeartbeat(output string) string {
 	lines := strings.Split(output, "\n")
 	var filteredLines []string
 	for _, line := range lines {
-		if !strings.Contains(line, "ACK") && !strings.Contains(line, "HEARTBEAT") {
+		trimmedLine := strings.TrimSpace(line)
+		if trimmedLine != "ACK" && trimmedLine != "HEARTBEAT" {
 			filteredLines = append(filteredLines, line)
 		}
 	}
@@ -431,6 +435,7 @@ func filterAckHeartbeat(output string) string {
 func startHTTPServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/pattern", handlePattern)
+	mux.HandleFunc("/serial-numbers", handleSerialNumbers) // Add this line
 
 	// Create a new CORS handler
 	c := cors.New(cors.Options{
@@ -449,7 +454,9 @@ func startHTTPServer() {
 }
 
 func handlePattern(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Received pattern request from %s", r.RemoteAddr)
 	if r.Method != http.MethodPost {
+		log.Printf("Invalid method for pattern request: %s", r.Method)
 		http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -457,26 +464,28 @@ func handlePattern(w http.ResponseWriter, r *http.Request) {
 	// Read the raw body
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
+		log.Printf("Error reading pattern request body: %v", err)
 		http.Error(w, "Error reading request body", http.StatusInternalServerError)
 		return
 	}
 
 	// Log the received JSON
-	log.Printf("Received JSON: %s", string(body))
+	log.Printf("Received pattern JSON: %s", string(body))
 
 	var pattern motors.Pattern
 	err = json.Unmarshal(body, &pattern)
 	if err != nil {
-		log.Printf("Error decoding JSON: %v", err)
+		log.Printf("Error decoding pattern JSON: %v", err)
 		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
 		return
 	}
 
 	currentPattern = &pattern
-	log.Printf("Received new pattern: %+v", pattern)
+	log.Printf("New pattern set: %+v", pattern)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Pattern received successfully"))
+	log.Printf("Pattern request processed successfully")
 }
 
 func playCurrentPattern() {
@@ -517,11 +526,140 @@ func updateDeviceStatus(deviceID string, isACK, isHeartbeat bool) {
 	}
 }
 
+// Modify the handleDeviceUpdates function
 func handleDeviceUpdates(conn *comms.SerialConnection) {
 	deviceUpdateChan := make(chan comms.ScreenUpdate, 100)
 	go comms.ReadSerialOutput(conn, deviceUpdateChan, connections, &connectionsMutex)
 
 	for update := range deviceUpdateChan {
-		processDeviceUpdate(update)
+		go processDeviceUpdate(update)
 	}
+}
+
+func handleSerialNumbers(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Received serial numbers request from %s", r.RemoteAddr)
+	if r.Method != http.MethodGet {
+		log.Printf("Invalid method for serial numbers request: %s", r.Method)
+		http.Error(w, "Only GET method is allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Create a channel for the result
+	resultChan := make(chan map[string]map[string]string)
+
+	// Run getSerialNumbers in a goroutine
+	go func() {
+		resultChan <- getSerialNumbers()
+	}()
+
+	// Wait for the result or timeout
+	select {
+	case serialNumbers := <-resultChan:
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(serialNumbers); err != nil {
+			log.Printf("Error encoding serial numbers: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Serial numbers request processed successfully")
+	case <-time.After(15 * time.Second):
+		log.Printf("Timeout while processing serial numbers request")
+		http.Error(w, "Request timed out", http.StatusRequestTimeout)
+	}
+}
+
+// Modify the getSerialNumbers function
+func getSerialNumbers() map[string]map[string]string {
+	log.Println("Collecting serial numbers for all devices")
+	result := make(map[string]map[string]string)
+	var wg sync.WaitGroup
+	resultMutex := sync.Mutex{}
+
+	for _, conn := range connections {
+		wg.Add(1)
+		go func(conn *comms.SerialConnection) {
+			defer wg.Done()
+			deviceInfo := make(map[string]string)
+			deviceInfo["hardcoded_serial"] = getHardcodedSerialNumber(conn.DeviceID)
+			deviceInfo["received_serial"] = ""
+
+			log.Printf("Sending 'S' command to device %s", conn.DeviceID)
+			comms.SendCommand("S", &connectionsMutex, connections, getDeviceIndex(conn.DeviceID))
+
+			// Wait and check for the serial number multiple times
+			for attempt := 0; attempt < 5; attempt++ {
+				time.Sleep(500 * time.Millisecond)
+
+				connectionsMutex.Lock()
+				output := conn.Output
+				connectionsMutex.Unlock()
+
+				log.Printf("Raw output received from device %s (attempt %d):\n%s", conn.DeviceID, attempt+1, output)
+
+				serialNo := extractSerialNumber(output)
+				if serialNo != "" {
+					deviceInfo["received_serial"] = serialNo
+					log.Printf("Parsed serial number for device %s: %s", conn.DeviceID, serialNo)
+					break
+				}
+
+				if attempt == 4 {
+					log.Printf("Failed to retrieve serial number for device %s after 5 attempts", conn.DeviceID)
+				}
+			}
+
+			resultMutex.Lock()
+			result[conn.DeviceID] = deviceInfo
+			resultMutex.Unlock()
+		}(conn)
+	}
+
+	done := make(chan bool)
+	go func() {
+		wg.Wait()
+		done <- true
+	}()
+
+	select {
+	case <-done:
+		log.Println("Finished collecting serial numbers")
+	case <-time.After(10 * time.Second):
+		log.Println("Timeout while collecting serial numbers")
+	}
+
+	return result
+}
+
+func extractSerialNumber(output string) string {
+	lines := strings.Split(output, "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "SERIAL_NO:") && i+1 < len(lines) {
+			return strings.TrimSpace(lines[i+1])
+		}
+	}
+	return ""
+}
+
+func getHardcodedSerialNumber(deviceID string) string {
+	// This function should return the hardcoded serial number for the given device ID
+	// You'll need to implement this based on your device information
+	hardcodedSerials := map[string]string{
+		"0": "0671FF383159503043112607",
+		"1": "066DFF515049657187212124",
+		"2": "066CFF383159503043112637",
+		"3": "066BFF515049657187203314",
+		"4": "066FFF383159503043114308",
+		"5": "066EFF383159503043112729",
+		"6": "066CFF383159503043112926",
+	}
+	return hardcodedSerials[deviceID]
+}
+
+func getDeviceIndex(deviceID string) int {
+	for i, conn := range connections {
+		if conn.DeviceID == deviceID {
+			return i
+		}
+	}
+	return -1
 }

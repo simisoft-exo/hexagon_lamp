@@ -154,8 +154,10 @@ func waitForAnyResponse(conn *SerialConnection, expectedResponses []string, time
 
 func ReadSerialOutput(conn *SerialConnection, deviceUpdateChan chan<- ScreenUpdate, connections []*SerialConnection, connectionsMutex *sync.Mutex) {
 	reader := bufio.NewReader(conn.Port)
+	buffer := make([]byte, 1024)
+
 	for {
-		line, err := reader.ReadString('\n')
+		n, err := reader.Read(buffer)
 		if err != nil {
 			if err != io.EOF {
 				debugLog("Error reading from %s: %v", conn.DeviceID, err)
@@ -164,13 +166,24 @@ func ReadSerialOutput(conn *SerialConnection, deviceUpdateChan chan<- ScreenUpda
 			return
 		}
 
-		line = strings.TrimSpace(line)
-		debugLog("Received from device %s: %s", conn.DeviceID, line)
+		if n > 0 {
+			data := string(buffer[:n])
+			debugLog("Received from device %s: %s", conn.DeviceID, data)
 
-		select {
-		case deviceUpdateChan <- ScreenUpdate{DeviceID: conn.DeviceID, Output: line + "\n"}:
-		default:
-			debugLog("Warning: Device update channel is full for %s. Update dropped.", conn.DeviceID)
+			connectionsMutex.Lock()
+			conn.Output += data
+			connectionsMutex.Unlock()
+
+			lines := strings.Split(data, "\n")
+			for _, line := range lines {
+				if strings.TrimSpace(line) != "" {
+					select {
+					case deviceUpdateChan <- ScreenUpdate{DeviceID: conn.DeviceID, Output: line + "\n"}:
+					default:
+						debugLog("Warning: Device update channel is full for %s. Update dropped.", conn.DeviceID)
+					}
+				}
+			}
 		}
 	}
 }
