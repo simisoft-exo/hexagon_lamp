@@ -72,6 +72,10 @@ function MotorPatternEditor() {
     });
   };
 
+  const handleMotorSelect = (motorIndex) => {
+    setSelectedMotor(motorIndex);
+  };
+
   return (
     <div className="flex">
       {/* Left Pane: Segment Editor and Track Visualization */}
@@ -188,15 +192,8 @@ function MotorPatternEditor() {
             selectedMotor={selectedMotor} 
             motorAssignments={motorAssignments}
             onMotorAssign={handleMotorAssign}
+            onMotorSelect={handleMotorSelect}
           />
-          <div className="mt-4">
-            <h3 className="text-lg font-semibold">Motor Assignments</h3>
-            <ul>
-              {Object.entries(motorAssignments).map(([position, motor]) => (
-                <li key={position}>Position {position}: Motor {motor}</li>
-              ))}
-            </ul>
-          </div>
         </div>
       </div>
     </div>

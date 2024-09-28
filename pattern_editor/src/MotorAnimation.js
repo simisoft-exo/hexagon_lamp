@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-const MotorAnimation = ({ tracks, selectedMotor, motorAssignments, onMotorAssign }) => {
+const MotorAnimation = ({ tracks, selectedMotor, motorAssignments, onMotorAssign, onMotorSelect }) => {
   const canvasRef = useRef(null);
   const [hoveredMotor, setHoveredMotor] = useState(null);
 
@@ -9,22 +9,26 @@ const MotorAnimation = ({ tracks, selectedMotor, motorAssignments, onMotorAssign
     const ctx = canvas.getContext('2d');
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
-    const radius = 20;
+    const baseRadius = 20;
     const outerRadius = 100;
+
+    const motorPositions = [
+      { x: centerX, y: centerY }, // Center motor
+      ...Array(6).fill().map((_, i) => {
+        const angle = (i * Math.PI) / 3;
+        return {
+          x: centerX + outerRadius * Math.cos(angle),
+          y: centerY + outerRadius * Math.sin(angle)
+        };
+      })
+    ];
 
     const drawMotors = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Draw center motor
-      drawMotor(ctx, centerX, centerY, radius, 0);
-
-      // Draw outer motors
-      for (let i = 0; i < 6; i++) {
-        const angle = (i * Math.PI) / 3;
-        const x = centerX + outerRadius * Math.cos(angle);
-        const y = centerY + outerRadius * Math.sin(angle);
-        drawMotor(ctx, x, y, radius, i + 1);
-      }
+      motorPositions.forEach((pos, index) => {
+        drawMotor(ctx, pos.x, pos.y, baseRadius, index);
+      });
     };
 
     const drawMotor = (ctx, x, y, radius, motorIndex) => {
@@ -46,7 +50,9 @@ const MotorAnimation = ({ tracks, selectedMotor, motorAssignments, onMotorAssign
 
     const getMotorColor = (motorIndex) => {
       if (hoveredMotor === motorIndex) return 'lightblue';
-      if (motorAssignments[motorIndex] !== undefined) return 'green';
+      if (motorAssignments[motorIndex] !== undefined) {
+        return motorAssignments[motorIndex] === selectedMotor ? 'blue' : 'green';
+      }
       return 'gray';
     };
 
@@ -74,16 +80,27 @@ const MotorAnimation = ({ tracks, selectedMotor, motorAssignments, onMotorAssign
         const progress = currentTimes[motorIndex] / currentSegment.duration;
         const speed = currentSegment.speed * 0.06; // Convert to 0-6 range
 
-        // Update motor position based on speed and progress
-        const angle = progress * speed * Math.PI * 2;
-        const x = centerX + outerRadius * Math.cos(angle);
-        const y = centerY + outerRadius * Math.sin(angle);
+        // Calculate the radius based on speed
+        const radiusMultiplier = 1 + speed / 3; // Adjust this factor to control the size change
+        const dynamicRadius = baseRadius * radiusMultiplier;
+
+        // Add a pulsing effect based on the segment duration
+        const pulseProgress = (currentTimes[motorIndex] % 1000) / 1000; // Pulse every second
+        const pulseRadius = dynamicRadius * (1 + 0.2 * Math.sin(pulseProgress * Math.PI * 2));
+        
+        const { x, y } = motorPositions[motorIndex];
 
         // Draw animation indicator for this motor
         ctx.beginPath();
-        ctx.arc(x, y, 5, 0, 2 * Math.PI);
+        ctx.arc(x, y, dynamicRadius, 0, 2 * Math.PI);
         ctx.fillStyle = motorIndex === selectedMotor ? 'blue' : 'rgba(0, 0, 255, 0.3)';
         ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(x, y, pulseRadius, 0, 2 * Math.PI);
+        ctx.strokeStyle = motorIndex === selectedMotor ? 'rgba(0, 0, 255, 0.5)' : 'rgba(0, 0, 255, 0.2)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
       });
 
       requestAnimationFrame(animate);
@@ -137,15 +154,31 @@ const MotorAnimation = ({ tracks, selectedMotor, motorAssignments, onMotorAssign
   };
 
   return (
-    <canvas 
-      ref={canvasRef} 
-      width="300" 
-      height="300" 
-      onClick={handleCanvasClick}
-      onMouseMove={handleCanvasMouseMove}
-      onMouseLeave={() => setHoveredMotor(null)}
-      style={{ cursor: 'pointer' }}
-    />
+    <div>
+      <canvas 
+        ref={canvasRef} 
+        width="300" 
+        height="300" 
+        onClick={handleCanvasClick}
+        onMouseMove={handleCanvasMouseMove}
+        onMouseLeave={() => setHoveredMotor(null)}
+        style={{ cursor: 'pointer' }}
+      />
+      <div className="mt-4">
+        <h3 className="text-lg font-semibold">Motor Assignments</h3>
+        <ul>
+          {Object.entries(motorAssignments).map(([position, motor]) => (
+            <li 
+              key={position} 
+              className="cursor-pointer hover:bg-gray-100 p-1"
+              onClick={() => onMotorSelect(parseInt(motor))}
+            >
+              Position {position}: Motor {motor}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
   );
 };
 

@@ -399,37 +399,24 @@ func safeUpdateDeviceStatus(deviceID string, isACK, isHeartbeat bool) {
 
 // Modify the processDeviceUpdate function
 func processDeviceUpdate(update ScreenUpdate) {
+	trimmedOutput := strings.TrimSpace(update.Output)
+	if trimmedOutput == "ACK" {
+		safeUpdateDeviceStatus(update.DeviceID, true, false)
+		return
+	}
+	if trimmedOutput == "HEARTBEAT" {
+		safeUpdateDeviceStatus(update.DeviceID, false, true)
+		return
+	}
+
 	for _, conn := range connections {
 		if conn.DeviceID == update.DeviceID {
-			if strings.Contains(update.Output, "ACK") {
-				safeUpdateDeviceStatus(conn.DeviceID, true, false)
-			}
-			if strings.Contains(update.Output, "HEARTBEAT") {
-				safeUpdateDeviceStatus(conn.DeviceID, false, true)
-			}
-
-			filteredOutput := filterAckHeartbeat(update.Output)
-			if filteredOutput != "" {
-				connectionsMutex.Lock()
-				conn.Output = limitOutputBuffer(conn.Output + filteredOutput)
-				connectionsMutex.Unlock()
-			}
+			connectionsMutex.Lock()
+			conn.Output = limitOutputBuffer(conn.Output + update.Output)
+			connectionsMutex.Unlock()
 			break
 		}
 	}
-}
-
-// Add this new function to filter out ACK and HEARTBEAT messages
-func filterAckHeartbeat(output string) string {
-	lines := strings.Split(output, "\n")
-	var filteredLines []string
-	for _, line := range lines {
-		trimmedLine := strings.TrimSpace(line)
-		if trimmedLine != "ACK" && trimmedLine != "HEARTBEAT" {
-			filteredLines = append(filteredLines, line)
-		}
-	}
-	return strings.Join(filteredLines, "\n")
 }
 
 func startHTTPServer() {

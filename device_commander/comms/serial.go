@@ -170,19 +170,26 @@ func ReadSerialOutput(conn *SerialConnection, deviceUpdateChan chan<- ScreenUpda
 			data := string(buffer[:n])
 			debugLog("Received from device %s: %s", conn.DeviceID, data)
 
-			connectionsMutex.Lock()
-			conn.Output += data
-			connectionsMutex.Unlock()
-
 			lines := strings.Split(data, "\n")
+			var filteredLines []string
 			for _, line := range lines {
-				if strings.TrimSpace(line) != "" {
-					select {
-					case deviceUpdateChan <- ScreenUpdate{DeviceID: conn.DeviceID, Output: line + "\n"}:
-					default:
-						debugLog("Warning: Device update channel is full for %s. Update dropped.", conn.DeviceID)
-					}
+				trimmedLine := strings.TrimSpace(line)
+				if trimmedLine == "ACK" {
+					deviceUpdateChan <- ScreenUpdate{DeviceID: conn.DeviceID, Output: "ACK\n"}
+				} else if trimmedLine == "HEARTBEAT" {
+					deviceUpdateChan <- ScreenUpdate{DeviceID: conn.DeviceID, Output: "HEARTBEAT\n"}
+				} else if trimmedLine != "" {
+					filteredLines = append(filteredLines, line)
 				}
+			}
+
+			filteredData := strings.Join(filteredLines, "\n")
+			if filteredData != "" {
+				connectionsMutex.Lock()
+				conn.Output += filteredData + "\n"
+				connectionsMutex.Unlock()
+
+				deviceUpdateChan <- ScreenUpdate{DeviceID: conn.DeviceID, Output: filteredData + "\n"}
 			}
 		}
 	}
