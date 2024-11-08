@@ -1,5 +1,19 @@
 #!/bin/bash
 
+# Get the absolute path of the script and project root
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+DEVICE_HELPERS="$(dirname "$SCRIPT_PATH")"
+PROJECT_ROOT="$(dirname "$DEVICE_HELPERS")"
+CURRENT_DIR="$(pwd)"
+
+# Ensure we're running from project root
+if [ "$CURRENT_DIR" != "$PROJECT_ROOT" ]; then
+    echo "Error: Script must be run from project root directory ($PROJECT_ROOT)"
+    echo "Current directory: $CURRENT_DIR"
+    echo "Please run as: ./device_helpers/upload_via_hexagon.sh"
+    exit 1
+fi
+
 # Set variables
 SKETCH_NAME="simplefoc_tuning"
 BOARD="STMicroelectronics:stm32:Disco"
@@ -24,26 +38,43 @@ log "Build path: $BUILD_PATH"
 mkdir -p "$BUILD_PATH"
 log "Created build directory (if it didn't exist)"
 
-# Navigate to the sketch directory
-log "Changing to sketch directory"
-cd "$SKETCH_DIR" || { log "Error: Unable to find $SKETCH_NAME directory"; exit 1; }
-log "Current directory: $(pwd)"
+ARDUINO_CLI_ABS="$DEVICE_HELPERS/bin/arduino-cli"
+
+log "Using arduino-cli at: $ARDUINO_CLI_ABS"
+log "Sketch directory: $SKETCH_DIR"
+
+# Verify arduino-cli exists and is executable
+if [ ! -x "$ARDUINO_CLI_ABS" ]; then
+    if [ ! -e "$ARDUINO_CLI_ABS" ]; then
+        log "File does not exist: $ARDUINO_CLI_ABS"
+    elif [ ! -f "$ARDUINO_CLI_ABS" ]; then
+        log "Path exists but is not a file: $ARDUINO_CLI_ABS"
+    else
+        log "File exists but is not executable: $ARDUINO_CLI_ABS"
+    fi
+    log "Error: arduino-cli not found at $ARDUINO_CLI_ABS or is not executable"
+    exit 1
+fi
+
+# Verify the file exists and is executable
+ls -l "$ARDUINO_CLI_ABS" || log "Cannot list arduino-cli file"
 
 # Compile the Arduino sketch with caching, parallel jobs, and size optimization
 log "Starting Arduino CLI compilation..."
-arduino-cli compile -b $BOARD $SKETCH_NAME.ino \
+"$ARDUINO_CLI_ABS" compile -b $BOARD "$SKETCH_DIR/$SKETCH_NAME.ino" \
     --build-path "$BUILD_PATH" \
     --build-cache-path "$BUILD_PATH/cache" \
-    --log-level info
+    --log-level info \
+    --jobs $(( $(nproc) - 2 ))
 
 # Check if compilation was successful
 if [ $? -eq 0 ]; then
     log "Compilation successful."
     log "Copying binary to remote host..."
-    
+
     # Copy the binary file to the remote host
     scp "$BUILD_PATH/$SKETCH_NAME.ino.bin" $REMOTE_ALIAS:$REMOTE_PATH
-    
+
     # Check if file transfer was successful
     if [ $? -eq 0 ]; then
         log "Binary file successfully copied to remote host."

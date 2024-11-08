@@ -1,6 +1,9 @@
 package main
 
 import (
+	"device_commander/comms"
+	"device_commander/lights"
+	"device_commander/motors"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -11,10 +14,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"device_commander/comms"
-	"device_commander/lights"
-	"device_commander/motors"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rs/cors"
@@ -45,9 +44,7 @@ type DeviceStatus struct {
 	LastHeartbeat time.Time
 }
 
-var (
-	deviceStatuses map[string]*DeviceStatus
-)
+var deviceStatuses map[string]*DeviceStatus
 
 // Initialize LEDs in init() function
 func init() {
@@ -63,7 +60,6 @@ func init() {
 }
 
 func main() {
-
 	var err error
 	logFile, err = os.OpenFile("debug.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
@@ -83,14 +79,23 @@ func main() {
 
 	// Device info for all 7 devices
 	devicesJSON := `[
-        {"device_serial_no": "0671FF383159503043112607", "device_id": "0", "serial_port": "/dev/ttyACM0"},
-        {"device_serial_no": "066DFF515049657187212124", "device_id": "1", "serial_port": "/dev/ttyACM1"},
-        {"device_serial_no": "066CFF383159503043112637", "device_id": "2", "serial_port": "/dev/ttyACM2"},
-        {"device_serial_no": "066BFF515049657187203314", "device_id": "3", "serial_port": "/dev/ttyACM3"},
-        {"device_serial_no": "066FFF383159503043114308", "device_id": "4", "serial_port": "/dev/ttyACM4"},
-        {"device_serial_no": "066EFF383159503043112729", "device_id": "5", "serial_port": "/dev/ttyACM5"},
-        {"device_serial_no": "066CFF383159503043112926", "device_id": "6", "serial_port": "/dev/ttyACM6"}
-    ]`
+	       {"device_serial_no": "0671FF383159503043112607", "device_id": "0", "serial_port": "/dev/ttyACM0"},
+	       {"device_serial_no": "066DFF515049657187212124", "device_id": "1", "serial_port": "/dev/ttyACM1"},
+	       {"device_serial_no": "066CFF383159503043112637", "device_id": "2", "serial_port": "/dev/ttyACM2"},
+	       {"device_serial_no": "066BFF515049657187203314", "device_id": "3", "serial_port": "/dev/ttyACM3"},
+	       {"device_serial_no": "066FFF383159503043114308", "device_id": "4", "serial_port": "/dev/ttyACM4"},
+	       {"device_serial_no": "066EFF383159503043112729", "device_id": "5", "serial_port": "/dev/ttyACM5"},
+	       {"device_serial_no": "066CFF383159503043112926", "device_id": "6", "serial_port": "/dev/ttyACM6"}
+	   ]`
+	// devicesJSON := `[
+	//        {"device_serial_no": "0671FF383159503043112607", "device_id": "0", "serial_port": "/dev/ttyACM7"},
+	//        {"device_serial_no": "066DFF515049657187212124", "device_id": "1", "serial_port": "/dev/ttyACM8"},
+	//        {"device_serial_no": "066CFF383159503043112637", "device_id": "2", "serial_port": "/dev/ttyACM9"},
+	//        {"device_serial_no": "066BFF515049657187203314", "device_id": "3", "serial_port": "/dev/ttyACM10"},
+	//        {"device_serial_no": "066FFF383159503043114308", "device_id": "4", "serial_port": "/dev/ttyACM11"},
+	//        {"device_serial_no": "066EFF383159503043112729", "device_id": "5", "serial_port": "/dev/ttyACM12"},
+	//        {"device_serial_no": "066CFF383159503043112926", "device_id": "6", "serial_port": "/dev/ttyACM13"}
+	//    ]`
 	var devices []comms.DeviceInfo
 	err = json.Unmarshal([]byte(devicesJSON), &devices)
 	if err != nil {
@@ -154,15 +159,15 @@ func main() {
 	// Start the screen update goroutine
 	go screenUpdateLoop()
 
-	go comms.RunBluetooth()
-	go lights.Run(panel)
+	// go comms.RunBluetooth()
+	// go lights.Run(panel)
 
 	// Start the screen refresh ticker
 	screenRefreshTicker = time.NewTicker(100 * time.Millisecond)
 	defer screenRefreshTicker.Stop()
 
 	// Start the HTTP server
-	go startHTTPServer()
+	// go startHTTPServer()
 
 	drawScreen()
 	for {
