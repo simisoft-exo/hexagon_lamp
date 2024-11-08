@@ -33,7 +33,7 @@ void heartbeat()
 {
   if(current_device_state == RUNNING)
   {
-    Serial.println("HEARTBEAT");
+    Serial.println("HB");
     last_heartbeat_time = millis();
   }
 }
@@ -63,7 +63,7 @@ void do_motor(char *cmd)
 
   command.motor(&motor, cmd);
 
-  SimpleFOCDebug::print("ACK_MOTOR: ");
+  SimpleFOCDebug::print("K_MOT: ");
   Serial.println(cmd_copy);
 }
 
@@ -82,13 +82,13 @@ void print_device_serial_no() {
 
 void ack_handshake() {
   // String serial = get_serial_number();
-  Serial.println("ACK");
+  Serial.println("K");
   // Serial.println(serial);
 }
 
 void reset_board()
 {
-  Serial.println("ACK_RESET");
+  Serial.println("K_RESET");
   delay(1000);
   NVIC_SystemReset();
 }
@@ -106,28 +106,28 @@ void setup()
   command.add('I', doInit, "init");
   command.add('R', doReset, "reset");
   command.add('S', doSerialNo, "serial_no");
-  Serial.print("SETUP_DONE");
+  Serial.print("K_SETUP");
 }
 
 
 String interpretFOCStatus(FOCMotorStatus status) {
   switch(status) {
     case FOCMotorStatus::motor_uninitialized:
-      return "MOTOR_UNINITIALIZED";
+      return "M_UNINITIALIZED";
     case FOCMotorStatus::motor_initializing:
-      return "MOTOR_INITIALIZING";
+      return "M_INITIALIZING";
     case FOCMotorStatus::motor_uncalibrated:
-      return "MOTOR_UNCALIBRATED";
+      return "M_UNCALIBRATED";
     case FOCMotorStatus::motor_calibrating:
-      return "MOTOR_CALIBRATING";
+      return "M_CALIBRATING";
     case FOCMotorStatus::motor_ready:
-      return "MOTOR_READY";
+      return "M_READY";
     case FOCMotorStatus::motor_error:
-      return "MOTOR_ERROR";
+      return "M_ERROR";
     case FOCMotorStatus::motor_calib_failed:
-      return "MOTOR_CALIB_FAILED";
+      return "M_CALIB_FAILED";
     case FOCMotorStatus::motor_init_failed:
-      return "MOTOR_INIT_FAILED";
+      return "M_INIT_FAILED";
     default:
       return "UNKNOWN_STATUS";
   }
@@ -144,7 +144,7 @@ bool on_demand_setup()
   motor.current_limit = 1;
 
   driver.pwm_frequency = DRIVER_PWM_FREQ;
-  
+
   sensor.init();
   driver.init();
 
@@ -185,7 +185,7 @@ bool on_demand_setup()
   }
 
   command.add('M', do_motor, (char *)"motor");
- 
+
 
   Serial.println(status_str);
   print_device_serial_no();
@@ -196,11 +196,11 @@ void handle_init()
 {
   if (current_device_state == UNINITIALIZED)
   {
-    Serial.println("ACK_INIT");
+    Serial.println("K_INIT");
     current_device_state = INITIALIZING;
     if (on_demand_setup())
     {
-      Serial.println("ACK_RUNNING");
+      Serial.println("K_RUNNING");
       current_device_state = RUNNING;
     }
     else

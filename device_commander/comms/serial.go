@@ -5,18 +5,20 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/tarm/serial"
+	"go.bug.st/serial"
 )
 
 var debugSerial bool
 
 func init() {
-	debugSerial = os.Getenv("DEBUG_SERIAL") == "true"
+	debugSerial = os.Getenv("DEBUG_SERIAL") != ""
+	fmt.Printf("DEBUG_SERIAL=%v\n", debugSerial)
 }
 
 func debugLog(format string, v ...interface{}) {
@@ -31,7 +33,7 @@ type ScreenUpdate struct {
 }
 
 const (
-	HANDSHAKE_INTERVAL = 5 * time.Second
+	HANDSHAKE_INTERVAL = 3 * time.Second
 )
 
 type DeviceInfo struct {
@@ -41,80 +43,84 @@ type DeviceInfo struct {
 }
 
 type SerialConnection struct {
-	Port     *serial.Port
+	Port     serial.Port
 	DeviceID string
 	Output   string
 	PortName string
 }
 
 func OpenSerialPort(port string, connections []*SerialConnection, connectionsMutex *sync.Mutex) (*SerialConnection, error) {
-	var conn *serial.Port
+	var conn serial.Port
 	var err error
-	for retries := 0; retries < 3; retries++ {
-		config := &serial.Config{
-			Name:        port,
-			Baud:        1000000,
-			ReadTimeout: time.Second * 30, // Increase timeout
-			Size:        8,
-			Parity:      serial.ParityNone,
-			StopBits:    serial.Stop1,
-		}
+	mode := &serial.Mode{
+		BaudRate:          1000000,
+		DataBits:          8,
+		Parity:            serial.NoParity,
+		StopBits:          serial.OneStopBit,
+		InitialStatusBits: &serial.ModemOutputBits{},
+	}
+
+	for retries := 0; retries < 5; retries++ {
 		debugLog("Attempting to open port %s (attempt %d)", port, retries+1)
-		conn, err = serial.OpenPort(config)
+		conn, err = serial.Open(port, mode)
 		if err == nil {
+			time.Sleep(time.Millisecond * 100)
 			break
 		}
 		debugLog("Failed to open port %s: %v. Retrying...", port, err)
-		time.Sleep(time.Second * 2)
+		time.Sleep(time.Duration(500+rand.Intn(1000)) * time.Millisecond)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to open port %s after 3 attempts: %v", port, err)
+		return nil, fmt.Errorf("failed to open port %s after 5 attempts: %v", port, err)
 	}
 
 	serialConn := &SerialConnection{
 		Port:     conn,
-		DeviceID: "", // This will be set later
+		DeviceID: "",
 		Output:   "",
 		PortName: port,
 	}
 
 	// Clear any existing data in the buffer
-	conn.Flush()
+	conn.ResetInputBuffer()
+	conn.ResetOutputBuffer()
 
 	// Perform initial handshake
-	if err := PerformHandshake(serialConn); err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("initial handshake failed for port %s: %v", port, err)
-	}
+	// if err := PerformHandshake(serialConn); err != nil {
+	// 	conn.Close()
+	// 	return nil, fmt.Errorf("initial handshake failed for port %s: %v", port, err)
+	// }
 
 	// Start periodic handshake goroutine
-	go PeriodicHandshake(serialConn, connections, connectionsMutex)
+	// go PeriodicHandshake(serialConn, connections, connectionsMutex)
 
 	debugLog("Successfully opened and initialized port %s", port)
 	return serialConn, nil
 }
 
 func PerformHandshake(conn *SerialConnection) error {
-	for retries := 0; retries < 3; retries++ {
+	for retries := 0; retries < 5; retries++ {
+		debugLog("Sending handshake to %s (attempt %d)", conn.PortName, retries+1)
 		_, err := conn.Port.Write([]byte("H\n"))
 		if err != nil {
 			debugLog("Failed to send handshake to %s: %v", conn.PortName, err)
 			continue
 		}
 
-		response, err := waitForAnyResponse(conn, []string{"ACK", "HEARTBEAT"}, 30*time.Second)
+		response, err := waitForAnyResponse(conn, []string{"K", "HB"}, 10*time.Second)
 		if err == nil {
-			debugLog("Received %s from device on port %s", response, conn.PortName)
+			debugLog("Received valid handshake response %s from device on port %s", response, conn.PortName)
 			return nil
 		}
 		debugLog("Handshake attempt %d failed for %s: %v", retries+1, conn.PortName, err)
-		time.Sleep(time.Second * 2)
+		time.Sleep(time.Duration(500+rand.Intn(1000)) * time.Millisecond)
 	}
-	return fmt.Errorf("handshake failed after 3 attempts for %s", conn.PortName)
+	return fmt.Errorf("handshake failed after 5 attempts for %s", conn.PortName)
 }
 
 func PeriodicHandshake(conn *SerialConnection, connections []*SerialConnection, connectionsMutex *sync.Mutex) {
-	ticker := time.NewTicker(HANDSHAKE_INTERVAL)
+	jitter := time.Duration(rand.Float64()*1000-500) * time.Millisecond
+	ticker := time.NewTicker(HANDSHAKE_INTERVAL + jitter)
 	defer ticker.Stop()
 
 	for {
@@ -130,18 +136,29 @@ func PeriodicHandshake(conn *SerialConnection, connections []*SerialConnection, 
 func waitForAnyResponse(conn *SerialConnection, expectedResponses []string, timeout time.Duration) (string, error) {
 	startTime := time.Now()
 	buffer := make([]byte, 128)
+	debugLog("Starting to wait for response from %s (expecting: %v)", conn.PortName, expectedResponses)
+
+	// Set read timeout for this operation
+	conn.Port.SetReadTimeout(timeout)
+
 	for time.Since(startTime) < timeout {
 		n, err := conn.Port.Read(buffer)
 		if err != nil {
 			if err != io.EOF {
-				debugLog("Error reading from %s: %v", conn.DeviceID, err)
+				debugLog("Error reading from %s: %v", conn.PortName, err)
 			}
 			return "", err
 		}
 		if n > 0 {
+			// Add hex dump of received data
+			debugLog("Raw data from %s: [%X] as string: [%s]",
+				conn.PortName,
+				buffer[:n],
+				string(buffer[:n]))
+
 			receivedData := string(buffer[:n])
 			conn.Output += receivedData
-			debugLog("Received data from %s: %s", conn.DeviceID, receivedData)
+
 			for _, expected := range expectedResponses {
 				if strings.Contains(receivedData, expected) {
 					return expected, nil
@@ -149,7 +166,7 @@ func waitForAnyResponse(conn *SerialConnection, expectedResponses []string, time
 			}
 		}
 	}
-	return "", fmt.Errorf("timeout waiting for response from %s. Received data: %s", conn.DeviceID, conn.Output)
+	return "", fmt.Errorf("timeout waiting for response from %s. Received data: %s", conn.PortName, conn.Output)
 }
 
 func ReadSerialOutput(conn *SerialConnection, deviceUpdateChan chan<- ScreenUpdate, connections []*SerialConnection, connectionsMutex *sync.Mutex) {
@@ -174,10 +191,10 @@ func ReadSerialOutput(conn *SerialConnection, deviceUpdateChan chan<- ScreenUpda
 			var filteredLines []string
 			for _, line := range lines {
 				trimmedLine := strings.TrimSpace(line)
-				if trimmedLine == "ACK" {
+				if trimmedLine == "K" {
 					deviceUpdateChan <- ScreenUpdate{DeviceID: conn.DeviceID, Output: "ACK\n"}
-				} else if trimmedLine == "HEARTBEAT" {
-					deviceUpdateChan <- ScreenUpdate{DeviceID: conn.DeviceID, Output: "HEARTBEAT\n"}
+				} else if trimmedLine == "HB" {
+					deviceUpdateChan <- ScreenUpdate{DeviceID: conn.DeviceID, Output: "HB\n"}
 				} else if trimmedLine != "" {
 					filteredLines = append(filteredLines, line)
 				}
@@ -196,6 +213,11 @@ func ReadSerialOutput(conn *SerialConnection, deviceUpdateChan chan<- ScreenUpda
 }
 
 func AttemptReconnection(conn *SerialConnection, connections []*SerialConnection, connectionsMutex *sync.Mutex) {
+	// Close the existing connection first
+	if conn.Port != nil {
+		conn.Port.Close()
+	}
+
 	for {
 		debugLog("Attempting to reconnect to %s", conn.PortName)
 		newConn, err := OpenSerialPort(conn.PortName, connections, connectionsMutex)

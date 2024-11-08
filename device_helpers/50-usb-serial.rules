@@ -1,0 +1,21 @@
+# Terminus Hub
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="1a40", ATTR{idProduct}=="0201", TEST=="power/control", ATTR{power/control}="on"
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="1a40", ATTR{idProduct}=="0201", TEST=="power/autosuspend", ATTR{power/autosuspend}="-1"
+
+# ST-LINK/V2.1 devices
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="374b", TEST=="power/control", ATTR{power/control}="on"
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="374b", TEST=="power/autosuspend", ATTR{power/autosuspend}="-1"
+
+# ST-LINK/V2.1 - Enhanced buffer and latency settings
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="374b", ATTR{bMaxPacketSize0}="64"
+ACTION=="add", SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", ATTR{latency_timer}="1"
+
+# Additional ST-LINK rules for better device handling
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="374b", MODE="0666"
+ACTION=="add", SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", SYMLINK+="stlink%n", MODE="0666"
+
+# Ensure consistent device naming and permissions
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="374b", GROUP="dialout", MODE="0666"
+
+# Additional rules for ST-LINK stability
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="374b", ATTR{power/persist}="1"
